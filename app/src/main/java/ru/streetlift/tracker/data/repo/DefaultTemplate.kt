@@ -35,7 +35,7 @@ object DefaultTemplate {
             ),
         ),
         Day(
-            "День 2 · Горизонт + 1 рука", true,
+            "День 2 · Горизонт + 1 рука", false,
             listOf(
                 Ex("Отжимания в горизонте", HEAVY_LEVER, 3..4, 5..8, 1..2, 2.5f, LeverageStages.DEFAULT),
                 Ex("Подтягивания на 1 руке", HEAVY_LEVER, 3..4, 3..6, 1..2, 2.5f),
@@ -50,7 +50,7 @@ object DefaultTemplate {
             ),
         ),
         Day(
-            "День 4 · Стойка + передний вис", true,
+            "День 4 · Стойка + передний вис", false,
             listOf(
                 Ex("Отжимания в стойке на руках", HEAVY_LEVER, 4..5, 6..10, 1..2, 2.5f),
                 Ex("Подтягивания в переднем висе", HEAVY_LEVER, 4..4, 5..8, 1..2, 2.5f, LeverageStages.DEFAULT),

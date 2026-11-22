@@ -26,7 +26,15 @@ data class SettingsEntity(
     val autoStartTimer: Boolean = true,
     /** Пройден ли экран «Настройка стартовых параметров». */
     val setupDone: Boolean = false,
-)
+    // Снимок цикла до первого «Пропустить» — для отмены пропуска(ов)
+    val undoDayIndex: Int? = null,
+    val undoCycleInMeso: Int? = null,
+    val undoCompletedRounds: Int? = null,
+    val undoOverride: String? = null,
+    val undoNextEpochDay: Long? = null,
+) {
+    val canUndoSkip: Boolean get() = undoDayIndex != null
+}
 
 @Serializable
 @Entity(tableName = "days")

@@ -79,6 +79,6 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk streetlift.apk
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest streetlift.apk \
-            --title "Стритлифт — сборка ${{ github.run_number }}" \
+            --title "Воркаут — сборка ${{ github.run_number }}" \
             --notes "Автосборка из ${GITHUB_SHA::7}. Прямая ссылка: https://github.com/${{ github.repository }}/releases/latest/download/streetlift.apk" \
             --latest

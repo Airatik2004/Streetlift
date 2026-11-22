@@ -114,6 +114,8 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
     fun skipDay() = viewModelScope.launch { repo.skipDay() }
     fun selectDay(index: Int) = viewModelScope.launch { repo.selectDay(index) }
     fun postpone() = viewModelScope.launch { repo.postpone() }
+    fun prepone() = viewModelScope.launch { repo.prepone() }
+    fun undoSkip() = viewModelScope.launch { repo.undoSkip() }
     fun setDeload(want: Boolean) = viewModelScope.launch { repo.setDeload(want) }
 }
 
@@ -148,7 +150,7 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
     ) {
         item {
             Column {
-                Text("Стритлифт", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text("Воркаут", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 Text(
                     "Круг ${s.completedRounds + 1} · день ${ui.nextDayIndex + 1} из ${ui.days.size}",
                     style = MaterialTheme.typography.bodyLarge,
@@ -255,6 +257,20 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
                             Icon(Icons.Filled.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
                             Text("Начать тренировку")
+                        }
+                        val today = LocalDate.now().toEpochDay()
+                        val postponed = (s.nextWorkoutEpochDay ?: today) > today
+                        if (postponed || s.canUndoSkip) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (postponed) {
+                                    TextButton(onClick = { vm.prepone() }, modifier = Modifier.weight(1f)) { Text("−1 день") }
+                                }
+                                if (s.canUndoSkip) {
+                                    TextButton(onClick = { vm.undoSkip() }, modifier = Modifier.weight(1f)) {
+                                        Text("Вернуть пропущенное")
+                                    }
+                                }
+                            }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = { vm.postpone() }, modifier = Modifier.weight(1f)) {

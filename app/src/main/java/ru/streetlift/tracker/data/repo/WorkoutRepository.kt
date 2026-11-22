@@ -132,7 +132,7 @@ class WorkoutRepository(private val db: AppDatabase) {
             }
         }
         settingsDao.upsert(
-            s.copy(
+            s.withoutUndo().copy(
                 currentDayIndex = adv.state.dayIndex,
                 cycleInMeso = adv.state.cycleInMeso,
                 completedRounds = adv.state.completedRounds,
@@ -147,11 +147,18 @@ class WorkoutRepository(private val db: AppDatabase) {
 
     // ---------------- Управление циклом ----------------
 
-    /** Пропуск дня: план не меняется, цикл сдвигается. */
+    /** Пропуск дня: план не меняется, цикл сдвигается. Первый пропуск запоминает состояние для отмены. */
     suspend fun skipDay() = db.withTransaction {
-        val s = getSettings()
+        val s0 = getSettings()
         val days = programDao.getDays()
         if (days.isEmpty()) return@withTransaction
+        val s = if (s0.canUndoSkip) s0 else s0.copy(
+            undoDayIndex = s0.currentDayIndex,
+            undoCycleInMeso = s0.cycleInMeso,
+            undoCompletedRounds = s0.completedRounds,
+            undoOverride = s0.deloadOverride.name,
+            undoNextEpochDay = s0.nextWorkoutEpochDay,
+        )
         val adv = ProgressionEngine.advanceCycle(
             CycleState(s.currentDayIndex, s.cycleInMeso, s.completedRounds, s.deloadOverride),
             s.currentDayIndex, days.size, s.deloadEvery,
@@ -165,6 +172,34 @@ class WorkoutRepository(private val db: AppDatabase) {
                 nextWorkoutEpochDay = null,
             ),
         )
+    }
+
+    /** Вернуть все пропуски с последней тренировки. */
+    suspend fun undoSkip() {
+        val s = getSettings()
+        if (!s.canUndoSkip) return
+        settingsDao.upsert(
+            s.withoutUndo().copy(
+                currentDayIndex = s.undoDayIndex ?: s.currentDayIndex,
+                cycleInMeso = s.undoCycleInMeso ?: s.cycleInMeso,
+                completedRounds = s.undoCompletedRounds ?: s.completedRounds,
+                deloadOverride = s.undoOverride?.let { runCatching { DeloadOverride.valueOf(it) }.getOrNull() } ?: s.deloadOverride,
+                nextWorkoutEpochDay = s.undoNextEpochDay,
+            ),
+        )
+    }
+
+    private fun SettingsEntity.withoutUndo() = copy(
+        undoDayIndex = null, undoCycleInMeso = null, undoCompletedRounds = null,
+        undoOverride = null, undoNextEpochDay = null,
+    )
+
+    /** Вернуть следующую тренировку на день раньше (не раньше сегодня). */
+    suspend fun prepone() {
+        val s = getSettings()
+        val next = s.nextWorkoutEpochDay ?: return
+        val moved = next - 1
+        settingsDao.upsert(s.copy(nextWorkoutEpochDay = if (moved <= today()) null else moved))
     }
 
     suspend fun selectDay(index: Int) {

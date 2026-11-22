@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
@@ -15,7 +17,7 @@ import androidx.room.RoomDatabase
         StageEntity::class,
         StageArchiveEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -24,9 +26,21 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun sessionDao(): SessionDao
 
     companion object {
+        /** v3: поля отмены пропуска дня. Данные сохраняются. */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE settings ADD COLUMN undoDayIndex INTEGER")
+                db.execSQL("ALTER TABLE settings ADD COLUMN undoCycleInMeso INTEGER")
+                db.execSQL("ALTER TABLE settings ADD COLUMN undoCompletedRounds INTEGER")
+                db.execSQL("ALTER TABLE settings ADD COLUMN undoOverride TEXT")
+                db.execSQL("ALTER TABLE settings ADD COLUMN undoNextEpochDay INTEGER")
+            }
+        }
+
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "streetlift.db")
-                // Ранних пользователей нет — старые схемы просто пересоздаются
+                .addMigrations(MIGRATION_2_3)
+                // Самая первая сборка (v1) не сохраняется — пересоздаётся
                 .fallbackToDestructiveMigration()
                 .build()
     }

@@ -66,6 +66,7 @@ class EditorViewModel(private val repo: WorkoutRepository) : ViewModel() {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EditorUi())
 
     fun saveExercise(e: ExerciseEntity) = viewModelScope.launch { repo.saveExercise(e) }
+    fun setAlternating(day: DayEntity, on: Boolean) = viewModelScope.launch { repo.updateDay(day.copy(alternating = on)) }
     fun setDeloadEvery(n: Int) = viewModelScope.launch { repo.setDeloadEvery(n) }
     fun setAutoStart(b: Boolean) = viewModelScope.launch { repo.setAutoStartTimer(b) }
     fun resetProgram() = viewModelScope.launch { repo.resetProgram() }
@@ -110,7 +111,22 @@ fun EditorScreen(repo: WorkoutRepository) {
                             Text("День ${day.position + 1} из 4", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                             Text(day.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         }
-                        if (day.alternating) Tag("Чередование")
+                    }
+                    if (ui.exercises[day.id].orEmpty().size > 1) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    if (day.alternating) "Чередование" else "Последовательно",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(
+                                    if (day.alternating) "А1 → Б1 → А2 → Б2…" else "все подходы А, потом все подходы Б",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(checked = day.alternating, onCheckedChange = { vm.setAlternating(day, it) })
+                        }
                     }
                     HorizontalDivider()
                     ui.exercises[day.id].orEmpty().forEach { e ->

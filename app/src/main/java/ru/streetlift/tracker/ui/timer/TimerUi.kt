@@ -130,16 +130,16 @@ private fun PresetRow(onPick: (Int) -> Unit, onManual: () -> Unit) {
         Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        FilledTonalButton(onClick = onManual) {
+            Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("Своё")
+        }
         PRESETS_SECONDS.forEach { sec ->
             OutlinedButton(
                 onClick = { onPick(sec) },
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 0.dp),
             ) { Text(Fmt.clock(sec)) }
-        }
-        FilledTonalButton(onClick = onManual) {
-            Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(4.dp))
-            Text("Своё")
         }
     }
 }

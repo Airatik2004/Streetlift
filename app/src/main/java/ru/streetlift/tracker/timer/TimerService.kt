@@ -124,15 +124,16 @@ class TimerService : Service() {
 
     private fun onTimerFinished(st: RestTimer.State) {
         val p = TimerPrefs.load(this).also { prefs = it }
-        val seconds = if (p.durationSec <= 0) TimerPrefs.UNTIL_STOP_CAP_SEC else p.durationSec
-        holdWakeLock(seconds * 1000L + 5_000)
+        // Ровно один свисток; системной мелодии даём прозвучать до 3 с
+        val signalMs = if (p.soundEnabled && p.soundUri != null) 3_000L else 2_000L
+        holdWakeLock(signalMs + 5_000)
         if (p.soundEnabled) playAlarm(p)
         vibrate(p)
         notifySafe(DONE_ID, buildDoneNotification(st))
         updateNotification(st)
         stopJob?.cancel()
         stopJob = scope.launch {
-            delay(seconds * 1000L)
+            delay(signalMs)
             stopAlarm()
             shutdown()
         }
@@ -250,9 +251,7 @@ class TimerService : Service() {
         if (p.soundUri == null && sp != null && gongId in loaded) {
             stopAlarm()
             val v = p.volume.coerceIn(0.1f, 1f)
-            // Свисток ~1 с + пауза; на длинном сигнале повторяется, пока его не остановят
-            val loop = -1
-            gongStream = sp.play(gongId, v, v, 1, loop, 1f)
+            gongStream = sp.play(gongId, v, v, 1, 0, 1f) // один раз
             return
         }
         try {
@@ -266,7 +265,7 @@ class TimerService : Service() {
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build()
                 if (Build.VERSION.SDK_INT >= 28) {
-                    isLooping = true // повторяется всё время сигнала
+                    isLooping = false
                     volume = p.volume.coerceIn(0.1f, 1f)
                 }
                 play()
@@ -310,7 +309,7 @@ class TimerService : Service() {
     }
 
     private fun vibrate(p: TimerPrefs.Prefs) {
-        if (p.vibration == TimerPrefs.Vibration.OFF) return
+        if (!p.vibration) return
         try {
             val vib: Vibrator = if (Build.VERSION.SDK_INT >= 31) {
                 getSystemService(VibratorManager::class.java).defaultVibrator
@@ -318,8 +317,8 @@ class TimerService : Service() {
                 @Suppress("DEPRECATION")
                 getSystemService(Vibrator::class.java)
             }
-            // repeat = 0 — повторять узор до stopAlarm()
-            vib.vibrate(VibrationEffect.createWaveform(p.vibration.pattern, 0))
+            // Одна вибрация длиной со свисток
+            vib.vibrate(VibrationEffect.createOneShot(TimerPrefs.VIBRATION_MS, VibrationEffect.DEFAULT_AMPLITUDE))
             vibrator = vib
         } catch (e: Exception) {
             Log.w(TAG, "vibrate failed", e)

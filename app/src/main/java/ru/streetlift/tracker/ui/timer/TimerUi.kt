@@ -376,26 +376,9 @@ fun SignalSettingsCard() {
                 )
             }
 
-            Text("Длительность сигнала", style = MaterialTheme.typography.bodyMedium)
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                TimerPrefs.DURATIONS.forEach { d ->
-                    FilterChip(
-                        selected = p.durationSec == d,
-                        onClick = { update(p.copy(durationSec = d)) },
-                        label = { Text(if (d == 0) "До «Стоп»" else "$d с") },
-                    )
-                }
-            }
-
-            Text("Вибрация", style = MaterialTheme.typography.bodyMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                TimerPrefs.Vibration.entries.forEach { v ->
-                    FilterChip(
-                        selected = p.vibration == v,
-                        onClick = { update(p.copy(vibration = v)) },
-                        label = { Text(v.title) },
-                    )
-                }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Вибрация вместе со свистком", Modifier.weight(1f))
+                Switch(checked = p.vibration, onCheckedChange = { update(p.copy(vibration = it)) })
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -414,8 +397,7 @@ fun SignalSettingsCard() {
                 Text("Проверить (таймер на 4 с)")
             }
             Text(
-                "Звук идёт через громкость будильника, поэтому слышен и в беззвучном режиме. " +
-                    "«До «Стоп»» — сигнал повторяется, пока не нажмёте «Стоп» в уведомлении или «Сброс» в таймере (максимум 60 с).",
+                "Звук идёт через громкость будильника, поэтому слышен и в беззвучном режиме.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

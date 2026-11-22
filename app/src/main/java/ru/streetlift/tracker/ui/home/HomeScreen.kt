@@ -150,7 +150,7 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
     ) {
         item {
             Column {
-                Text("Воркаут", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text("Дневник тренировок", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 Text(
                     "Круг ${s.completedRounds + 1} · день ${ui.nextDayIndex + 1} из ${ui.days.size}",
                     style = MaterialTheme.typography.bodyLarge,

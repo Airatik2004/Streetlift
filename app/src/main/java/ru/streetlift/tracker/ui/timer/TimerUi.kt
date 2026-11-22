@@ -196,7 +196,7 @@ fun ManualTimeDialog(initialSeconds: Int, onDismiss: () -> Unit, onConfirm: (Int
             TextButton(onClick = {
                 val total = (min.toIntOrNull() ?: 0) * 60 + (sec.toIntOrNull() ?: 0).coerceIn(0, 59)
                 if (total > 0) onConfirm(total)
-            }) { Text("Запустить") }
+            }) { Text("Поставить") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
     )
@@ -222,7 +222,7 @@ fun RestTimerPanel(
             onDismiss = { showManual = false },
             onConfirm = { s ->
                 showManual = false
-                TimerActions.start(ctx, s * 1000L, label)
+                TimerActions.set(s * 1000L, label)
             },
         )
     }
@@ -243,7 +243,7 @@ fun RestTimerPanel(
                 }
                 ControlsRow(st, big = false)
             }
-            PresetRow(onPick = { TimerActions.start(ctx, it * 1000L, label) }, onManual = { showManual = true })
+            PresetRow(onPick = { TimerActions.set(it * 1000L, label) }, onManual = { showManual = true })
         } else {
             TimerRing(st.progress, 280.dp, 12.dp, st.finished) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -265,11 +265,11 @@ fun RestTimerPanel(
                 }
             }
             ControlsRow(st, big = true)
-            PresetRow(onPick = { TimerActions.start(ctx, it * 1000L, label) }, onManual = { showManual = true })
+            PresetRow(onPick = { TimerActions.set(it * 1000L, label) }, onManual = { showManual = true })
         }
         if (recommendation != null) {
             RecommendationBanner(recommendation) {
-                TimerActions.start(ctx, recommendation.seconds * 1000L, label)
+                TimerActions.set(recommendation.seconds * 1000L, label)
             }
         }
     }
@@ -303,7 +303,7 @@ fun TimerScreen() {
             RestRecommender.recommend(ExerciseType.ACCESSORY, alternating = false, deload = false),
         )
         recs.forEach { r ->
-            RecommendationBanner(r) { TimerActions.start(ctx, r.seconds * 1000L, "") }
+            RecommendationBanner(r) { TimerActions.set(r.seconds * 1000L, "") }
         }
         Text(
             "В разгрузочном цикле рекомендации автоматически короче на 30 секунд.",
@@ -315,7 +315,7 @@ fun TimerScreen() {
 }
 
 private fun soundTitle(context: Context, uri: String?): String {
-    if (uri == null) return "гонг (встроенный)"
+    if (uri == null) return "свисток (встроенный)"
     return runCatching { RingtoneManager.getRingtone(context, Uri.parse(uri))?.getTitle(context) }
         .getOrNull() ?: "выбранный звук"
 }
@@ -365,7 +365,7 @@ fun SignalSettingsCard() {
                     Text("Мелодия: $title", maxLines = 1)
                 }
                 if (p.soundUri != null) {
-                    TextButton(onClick = { update(p.copy(soundUri = null)) }) { Text("Вернуть встроенный гонг") }
+                    TextButton(onClick = { update(p.copy(soundUri = null)) }) { Text("Вернуть встроенный свисток") }
                 }
                 Text("Громкость: ${(p.volume * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
                 Slider(

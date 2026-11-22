@@ -16,7 +16,7 @@ object TimerPrefs {
 
     data class Prefs(
         val soundEnabled: Boolean = true,
-        /** content:// ссылка на системный звук; null — встроенный гонг. */
+        /** content:// ссылка на системный звук; null — встроенный свисток. */
         val soundUri: String? = null,
         /** Длительность сигнала, с; 0 — до нажатия «Стоп» (но не дольше 60 с). */
         val durationSec: Int = 5,

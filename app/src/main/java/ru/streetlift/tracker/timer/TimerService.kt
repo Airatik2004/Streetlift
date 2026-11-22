@@ -237,7 +237,7 @@ class TimerService : Service() {
                 .build()
             soundPool = SoundPool.Builder().setMaxStreams(3).setAudioAttributes(attrs).build().also { sp ->
                 sp.setOnLoadCompleteListener { _, id, status -> if (status == 0) loaded += id }
-                gongId = sp.load(this, R.raw.timer_gong, 1)
+                gongId = sp.load(this, R.raw.timer_whistle, 1)
                 pipId = sp.load(this, R.raw.timer_pip, 1)
             }
         } catch (e: Exception) {
@@ -250,8 +250,8 @@ class TimerService : Service() {
         if (p.soundUri == null && sp != null && gongId in loaded) {
             stopAlarm()
             val v = p.volume.coerceIn(0.1f, 1f)
-            // Гонг звучит ~3 с; на длинном сигнале повторяется, пока его не остановят
-            val loop = if (p.durationSec in 1..3) 0 else -1
+            // Свисток ~1 с + пауза; на длинном сигнале повторяется, пока его не остановят
+            val loop = -1
             gongStream = sp.play(gongId, v, v, 1, loop, 1f)
             return
         }
@@ -406,6 +406,9 @@ class TimerService : Service() {
 
 /** Действия таймера из UI: меняют состояние и поднимают сервис. */
 object TimerActions {
+    /** Выставить время без запуска (пресеты, рекомендация, ручной ввод). */
+    fun set(ms: Long, label: String = RestTimer.state.value.label) = RestTimer.setDuration(ms, label)
+
     fun start(context: Context, ms: Long, label: String = RestTimer.state.value.label) {
         RestTimer.start(ms, label)
         TimerService.ensureRunning(context)

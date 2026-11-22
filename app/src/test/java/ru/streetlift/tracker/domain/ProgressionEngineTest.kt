@@ -284,8 +284,8 @@ class ProgressionEngineTest {
     }
 
     @Test
-    fun builtInStages_areOrderedSevenWithDefault() {
-        assertEquals(7, LeverageStages.builtIn.size)
+    fun builtInStages_areOrderedSixWithDefault() {
+        assertEquals(6, LeverageStages.builtIn.size)
         assertEquals("Закрытый", LeverageStages.builtIn.first().name)
         assertEquals("Фулл", LeverageStages.builtIn.last().name)
         assertTrue(LeverageStages.builtIn.any { it.name == LeverageStages.DEFAULT })

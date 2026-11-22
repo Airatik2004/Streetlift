@@ -25,6 +25,10 @@ data class BackupData(
     val stageArchive: List<StageArchiveEntity> = emptyList(),
 )
 
+/** Состояние до завершения тренировки. */
+@Serializable
+data class RollbackData(val settings: SettingsEntity, val exercises: List<ExerciseEntity>)
+
 object BackupJson {
     val json = Json {
         prettyPrint = true
@@ -35,4 +39,8 @@ object BackupJson {
     fun encode(data: BackupData): String = json.encodeToString(BackupData.serializer(), data)
 
     fun decode(text: String): BackupData = json.decodeFromString(BackupData.serializer(), text)
+
+    fun encodeRollback(data: RollbackData): String = json.encodeToString(RollbackData.serializer(), data)
+
+    fun decodeRollback(text: String): RollbackData = json.decodeFromString(RollbackData.serializer(), text)
 }

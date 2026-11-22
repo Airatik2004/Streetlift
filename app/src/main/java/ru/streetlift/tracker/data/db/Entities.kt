@@ -123,6 +123,8 @@ data class SessionEntity(
     val isDeload: Boolean,
     val alternating: Boolean,
     val summary: String = "",
+    /** JSON-снимок цикла и плана до завершения — для отката при удалении последней тренировки. */
+    val rollback: String? = null,
 )
 
 @Serializable

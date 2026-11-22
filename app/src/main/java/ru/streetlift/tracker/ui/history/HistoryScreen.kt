@@ -106,7 +106,13 @@ class HistoryViewModel(private val repo: WorkoutRepository) : ViewModel() {
         onResult(r.fold({ "База восстановлена из файла" }, { "Ошибка импорта: ${it.message}" }))
     }
 
-    fun delete(id: Long) = viewModelScope.launch { repo.deleteSession(id) }
+    val rollbackableId: StateFlow<Long?> =
+        repo.rollbackableSessionId.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    fun delete(id: Long, onResult: (String) -> Unit) = viewModelScope.launch {
+        val rolled = repo.deleteSession(id)
+        onResult(if (rolled) "Тренировка удалена, план и цикл возвращены к состоянию до неё" else "Тренировка удалена из истории")
+    }
 }
 
 @Composable
@@ -114,6 +120,7 @@ fun HistoryScreen(repo: WorkoutRepository) {
     val vm: HistoryViewModel = viewModel(factory = viewModelFactory { initializer { HistoryViewModel(repo) } })
     val history by vm.items.collectAsStateWithLifecycle()
     val archive by vm.archive.collectAsStateWithLifecycle()
+    val rollbackableId by vm.rollbackableId.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
     val toast: (String) -> Unit = { Toast.makeText(ctx, it, Toast.LENGTH_LONG).show() }
 
@@ -256,12 +263,16 @@ fun HistoryScreen(repo: WorkoutRepository) {
     }
     toDelete?.let { s ->
         ConfirmDialog(
-            title = "Удалить тренировку из истории?",
-            text = "${s.dayName}, ${formatDateTime(s.startedAt)}. План цикла это не изменит.",
+            title = "Удалить тренировку?",
+            text = "${s.dayName}, ${formatDateTime(s.startedAt)}. " + if (s.id == rollbackableId) {
+                "Это последняя тренировка: день цикла, круг, веса и подходы вернутся к состоянию до неё."
+            } else {
+                "Запись удалится только из истории — план цикла не изменится (на неё уже опираются более поздние тренировки)."
+            },
             confirm = "Удалить",
             onDismiss = { toDelete = null },
             onConfirm = {
-                vm.delete(s.id)
+                vm.delete(s.id, toast)
                 toDelete = null
             },
         )

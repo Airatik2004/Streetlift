@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         StageEntity::class,
         StageArchiveEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -26,6 +26,13 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun sessionDao(): SessionDao
 
     companion object {
+        /** v4: снимок для отката тренировки. Данные сохраняются. */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE sessions ADD COLUMN rollback TEXT")
+            }
+        }
+
         /** v3: поля отмены пропуска дня. Данные сохраняются. */
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -39,7 +46,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "streetlift.db")
-                .addMigrations(MIGRATION_2_3)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
                 // Самая первая сборка (v1) не сохраняется — пересоздаётся
                 .fallbackToDestructiveMigration()
                 .build()

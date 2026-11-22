@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import ru.streetlift.tracker.data.backup.BackupData
 import ru.streetlift.tracker.data.backup.BackupJson
+import ru.streetlift.tracker.data.backup.RollbackData
 import ru.streetlift.tracker.data.db.AppDatabase
 import ru.streetlift.tracker.data.db.DayEntity
 import ru.streetlift.tracker.data.db.ExerciseEntity
@@ -86,7 +87,41 @@ class WorkoutRepository(private val db: AppDatabase) {
 
     suspend fun discardSession(sessionId: Long) = sessionDao.deleteSession(sessionId)
 
-    suspend fun deleteSession(sessionId: Long) = sessionDao.deleteSession(sessionId)
+    /**
+     * Удаление из истории. Если это последняя завершённая тренировка — откатываем её последствия:
+     * позицию в цикле, круг, разгрузку и план упражнений. Возвращает true, если откат выполнен.
+     */
+    suspend fun deleteSession(sessionId: Long): Boolean = db.withTransaction {
+        val session = sessionDao.getSession(sessionId) ?: return@withTransaction false
+        val latest = sessionDao.getAllSessions().filter { it.finishedAt != null }.maxByOrNull { it.finishedAt ?: 0L }
+        var rolledBack = false
+        val snap = session.rollback?.let { runCatching { BackupJson.decodeRollback(it) }.getOrNull() }
+        if (latest?.id == session.id && snap != null) {
+            val cur = getSettings()
+            settingsDao.upsert(
+                cur.copy(
+                    currentDayIndex = snap.settings.currentDayIndex,
+                    cycleInMeso = snap.settings.cycleInMeso,
+                    completedRounds = snap.settings.completedRounds,
+                    deloadOverride = snap.settings.deloadOverride,
+                    nextWorkoutEpochDay = snap.settings.nextWorkoutEpochDay,
+                    undoDayIndex = null, undoCycleInMeso = null, undoCompletedRounds = null,
+                    undoOverride = null, undoNextEpochDay = null,
+                ),
+            )
+            val now = programDao.getAllExercises().associateBy { it.id }
+            val restored = snap.exercises.mapNotNull { old ->
+                now[old.id]?.withState(old.toState())?.copy(leverageStage = old.leverageStage)
+            }
+            if (restored.isNotEmpty()) programDao.updateExercises(restored)
+            rolledBack = true
+        }
+        sessionDao.deleteSession(sessionId)
+        rolledBack
+    }
+
+    /** Id последней завершённой тренировки, которую можно откатить. */
+    val rollbackableSessionId: Flow<Long?> = sessionDao.observeLastFinished().map { s -> s?.takeIf { it.rollback != null }?.id }
 
     /**
      * Завершение тренировки: пересчёт плана каждого упражнения дня движком прогрессии,
@@ -98,6 +133,7 @@ class WorkoutRepository(private val db: AppDatabase) {
         val s = getSettings()
         val days = programDao.getDays()
         val exercises = session.dayId?.let { programDao.getExercisesForDay(it) } ?: emptyList()
+        val rollback = runCatching { BackupJson.encodeRollback(RollbackData(s, exercises)) }.getOrNull()
 
         val lines = mutableListOf<String>()
         val updated = exercises.map { ex ->
@@ -141,7 +177,7 @@ class WorkoutRepository(private val db: AppDatabase) {
             ),
         )
         val summary = lines.joinToString("\n")
-        sessionDao.updateSession(session.copy(finishedAt = System.currentTimeMillis(), summary = summary))
+        sessionDao.updateSession(session.copy(finishedAt = System.currentTimeMillis(), summary = summary, rollback = rollback))
         summary
     }
 

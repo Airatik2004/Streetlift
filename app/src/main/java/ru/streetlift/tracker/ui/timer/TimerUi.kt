@@ -315,7 +315,7 @@ fun TimerScreen() {
 }
 
 private fun soundTitle(context: Context, uri: String?): String {
-    if (uri == null) return "звук уведомления (по умолчанию)"
+    if (uri == null) return "гонг (встроенный)"
     return runCatching { RingtoneManager.getRingtone(context, Uri.parse(uri))?.getTitle(context) }
         .getOrNull() ?: "выбранный звук"
 }
@@ -352,11 +352,10 @@ fun SignalSettingsCard() {
                 OutlinedButton(
                     onClick = {
                         val current = p.soundUri?.let { Uri.parse(it) }
-                            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
                         val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
                             .putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALL)
                             .putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Сигнал таймера")
-                            .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+                            .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, false)
                             .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
                             .putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, current)
                         runCatching { picker.launch(intent) }
@@ -364,6 +363,9 @@ fun SignalSettingsCard() {
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Мелодия: $title", maxLines = 1)
+                }
+                if (p.soundUri != null) {
+                    TextButton(onClick = { update(p.copy(soundUri = null)) }) { Text("Вернуть встроенный гонг") }
                 }
                 Text("Громкость: ${(p.volume * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
                 Slider(

@@ -14,6 +14,7 @@ import android.media.AudioManager
 import android.media.ToneGenerator
 import android.net.Uri
 import android.media.Ringtone
+import android.media.SoundPool
 import android.media.RingtoneManager
 import android.os.Build
 import android.os.IBinder
@@ -55,12 +56,18 @@ class TimerService : Service() {
     private var vibrator: Vibrator? = null
     private var tone: ToneGenerator? = null
     private var lastBeepSec = -1
+    private var soundPool: SoundPool? = null
+    private var gongId = 0
+    private var pipId = 0
+    private val loaded = mutableSetOf<Int>()
+    private var gongStream = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         createChannels(this)
+        initSoundPool()
         scope.launch {
             var wasFinished = RestTimer.state.value.finished
             RestTimer.state.collect { st ->
@@ -222,7 +229,32 @@ class TimerService : Service() {
 
     // ---------------- Звук, вибрация, wake lock ----------------
 
+    private fun initSoundPool() {
+        try {
+            val attrs = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            soundPool = SoundPool.Builder().setMaxStreams(3).setAudioAttributes(attrs).build().also { sp ->
+                sp.setOnLoadCompleteListener { _, id, status -> if (status == 0) loaded += id }
+                gongId = sp.load(this, R.raw.timer_gong, 1)
+                pipId = sp.load(this, R.raw.timer_pip, 1)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "soundpool failed", e)
+        }
+    }
+
     private fun playAlarm(p: TimerPrefs.Prefs) {
+        val sp = soundPool
+        if (p.soundUri == null && sp != null && gongId in loaded) {
+            stopAlarm()
+            val v = p.volume.coerceIn(0.1f, 1f)
+            // Гонг звучит ~3 с; на длинном сигнале повторяется, пока его не остановят
+            val loop = if (p.durationSec in 1..3) 0 else -1
+            gongStream = sp.play(gongId, v, v, 1, loop, 1f)
+            return
+        }
         try {
             stopAlarm()
             val uri = p.soundUri?.let { Uri.parse(it) }
@@ -250,6 +282,10 @@ class TimerService : Service() {
         } catch (_: Exception) {
         }
         ringtone = null
+        if (gongStream != 0) {
+            soundPool?.stop(gongStream)
+            gongStream = 0
+        }
         try {
             vibrator?.cancel()
         } catch (_: Exception) {
@@ -258,6 +294,12 @@ class TimerService : Service() {
     }
 
     private fun beep() {
+        val sp = soundPool
+        if (sp != null && pipId in loaded) {
+            val v = prefs.volume.coerceIn(0.1f, 1f)
+            sp.play(pipId, v, v, 2, 0, 1f)
+            return
+        }
         try {
             val t = tone ?: ToneGenerator(AudioManager.STREAM_ALARM, (prefs.volume * 100).toInt().coerceIn(10, 100))
                 .also { tone = it }
@@ -317,6 +359,8 @@ class TimerService : Service() {
         stopAlarm()
         tone?.release()
         tone = null
+        soundPool?.release()
+        soundPool = null
         releaseWakeLock()
         super.onDestroy()
     }

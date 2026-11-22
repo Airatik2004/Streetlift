@@ -1,5 +1,20 @@
 package ru.streetlift.tracker.ui.timer
 
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.media.RingtoneManager
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
+import androidx.core.content.IntentCompat
+import ru.streetlift.tracker.timer.TimerPrefs
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -274,6 +289,7 @@ fun TimerScreen() {
     ) {
         Text("Таймер отдыха", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.fillMaxWidth())
         RestTimerPanel(recommendation = null, compact = false)
+        SignalSettingsCard()
 
         Text(
             "Быстрые рекомендации",
@@ -295,5 +311,112 @@ fun TimerScreen() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.fillMaxWidth(),
         )
+    }
+}
+
+private fun soundTitle(context: Context, uri: String?): String {
+    if (uri == null) return "звук уведомления (по умолчанию)"
+    return runCatching { RingtoneManager.getRingtone(context, Uri.parse(uri))?.getTitle(context) }
+        .getOrNull() ?: "выбранный звук"
+}
+
+/** Настройки сигнала окончания отдыха: мелодия, длительность, громкость, вибрация, пики. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SignalSettingsCard() {
+    val ctx = LocalContext.current
+    var p by remember { mutableStateOf(TimerPrefs.load(ctx)) }
+    fun update(np: TimerPrefs.Prefs) {
+        p = np
+        TimerPrefs.save(ctx, np)
+    }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        if (res.resultCode == Activity.RESULT_OK) {
+            val picked = res.data?.let {
+                IntentCompat.getParcelableExtra(it, RingtoneManager.EXTRA_RINGTONE_PICKED_URI, Uri::class.java)
+            }
+            update(p.copy(soundUri = picked?.toString()))
+        }
+    }
+    val title = remember(p.soundUri) { soundTitle(ctx, p.soundUri) }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Сигнал окончания отдыха", style = MaterialTheme.typography.titleMedium)
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Звук", Modifier.weight(1f))
+                Switch(checked = p.soundEnabled, onCheckedChange = { update(p.copy(soundEnabled = it)) })
+            }
+            if (p.soundEnabled) {
+                OutlinedButton(
+                    onClick = {
+                        val current = p.soundUri?.let { Uri.parse(it) }
+                            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                        val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
+                            .putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALL)
+                            .putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Сигнал таймера")
+                            .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+                            .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+                            .putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, current)
+                        runCatching { picker.launch(intent) }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Мелодия: $title", maxLines = 1)
+                }
+                Text("Громкость: ${(p.volume * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
+                Slider(
+                    value = p.volume,
+                    onValueChange = { p = p.copy(volume = it) },
+                    onValueChangeFinished = { TimerPrefs.save(ctx, p) },
+                    valueRange = 0.1f..1f,
+                )
+            }
+
+            Text("Длительность сигнала", style = MaterialTheme.typography.bodyMedium)
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TimerPrefs.DURATIONS.forEach { d ->
+                    FilterChip(
+                        selected = p.durationSec == d,
+                        onClick = { update(p.copy(durationSec = d)) },
+                        label = { Text(if (d == 0) "До «Стоп»" else "$d с") },
+                    )
+                }
+            }
+
+            Text("Вибрация", style = MaterialTheme.typography.bodyMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TimerPrefs.Vibration.entries.forEach { v ->
+                    FilterChip(
+                        selected = p.vibration == v,
+                        onClick = { update(p.copy(vibration = v)) },
+                        label = { Text(v.title) },
+                    )
+                }
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Пики за 3 секунды до конца")
+                    Text(
+                        "короткий обратный отсчёт: пик-пик-пик",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = p.countdownBeeps, onCheckedChange = { update(p.copy(countdownBeeps = it)) })
+            }
+
+            Button(onClick = { TimerActions.start(ctx, 4_000, "Проверка сигнала") }, modifier = Modifier.fillMaxWidth()) {
+                Text("Проверить (таймер на 4 с)")
+            }
+            Text(
+                "Звук идёт через громкость будильника, поэтому слышен и в беззвучном режиме. " +
+                    "«До «Стоп»» — сигнал повторяется, пока не нажмёте «Стоп» в уведомлении или «Сброс» в таймере (максимум 60 с).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }

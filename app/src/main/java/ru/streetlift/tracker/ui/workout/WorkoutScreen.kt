@@ -219,6 +219,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
             onDismiss = { confirmFinish = false },
             onConfirm = {
                 confirmFinish = false
+                TimerActions.reset()
                 vm.finish { summary = it.ifBlank { "Тренировка сохранена." } }
             },
         )
@@ -231,6 +232,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
             onDismiss = { confirmDiscard = false },
             onConfirm = {
                 confirmDiscard = false
+                TimerActions.reset() // отдых больше не нужен
                 vm.discard(onExit)
             },
         )

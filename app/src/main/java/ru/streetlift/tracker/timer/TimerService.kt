@@ -10,6 +10,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.AudioManager
+import android.media.ToneGenerator
+import android.net.Uri
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.os.Build
@@ -48,6 +51,10 @@ class TimerService : Service() {
     private var lastKey = ""
     private var lastEndWall = 0L
     private var lastAcquire = 0L
+    private var prefs = TimerPrefs.Prefs()
+    private var vibrator: Vibrator? = null
+    private var tone: ToneGenerator? = null
+    private var lastBeepSec = -1
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -66,6 +73,7 @@ class TimerService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Всегда сначала уходим в foreground — иначе система убьёт сервис.
         goForeground(RestTimer.state.value)
+        prefs = TimerPrefs.load(this)
         when (intent?.action) {
             ACTION_TOGGLE -> RestTimer.toggle()
             ACTION_PLUS -> RestTimer.add(15_000)
@@ -86,6 +94,13 @@ class TimerService : Service() {
             stopJob = null
             stopAlarm()
             holdWakeLock(st.remainingMs + 60_000)
+            val sec = st.remainingSeconds
+            if (prefs.countdownBeeps && sec in 1..3 && sec != lastBeepSec) {
+                lastBeepSec = sec
+                beep()
+            } else if (sec > 3) {
+                lastBeepSec = -1
+            }
         } else if (!st.finished) {
             releaseWakeLock()
         }
@@ -101,14 +116,16 @@ class TimerService : Service() {
     }
 
     private fun onTimerFinished(st: RestTimer.State) {
-        holdWakeLock(10_000)
-        playAlarm()
-        vibrate()
+        val p = TimerPrefs.load(this).also { prefs = it }
+        val seconds = if (p.durationSec <= 0) TimerPrefs.UNTIL_STOP_CAP_SEC else p.durationSec
+        holdWakeLock(seconds * 1000L + 5_000)
+        if (p.soundEnabled) playAlarm(p)
+        vibrate(p)
         notifySafe(DONE_ID, buildDoneNotification(st))
         updateNotification(st)
         stopJob?.cancel()
         stopJob = scope.launch {
-            delay(6_000)
+            delay(seconds * 1000L)
             stopAlarm()
             shutdown()
         }
@@ -205,16 +222,21 @@ class TimerService : Service() {
 
     // ---------------- Звук, вибрация, wake lock ----------------
 
-    private fun playAlarm() {
+    private fun playAlarm(p: TimerPrefs.Prefs) {
         try {
             stopAlarm()
-            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val uri = p.soundUri?.let { Uri.parse(it) }
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
                 ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
             ringtone = RingtoneManager.getRingtone(this, uri)?.apply {
                 audioAttributes = AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ALARM)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build()
+                if (Build.VERSION.SDK_INT >= 28) {
+                    isLooping = true // повторяется всё время сигнала
+                    volume = p.volume.coerceIn(0.1f, 1f)
+                }
                 play()
             }
         } catch (e: Exception) {
@@ -228,9 +250,25 @@ class TimerService : Service() {
         } catch (_: Exception) {
         }
         ringtone = null
+        try {
+            vibrator?.cancel()
+        } catch (_: Exception) {
+        }
+        vibrator = null
     }
 
-    private fun vibrate() {
+    private fun beep() {
+        try {
+            val t = tone ?: ToneGenerator(AudioManager.STREAM_ALARM, (prefs.volume * 100).toInt().coerceIn(10, 100))
+                .also { tone = it }
+            t.startTone(ToneGenerator.TONE_PROP_BEEP, 150)
+        } catch (e: Exception) {
+            Log.w(TAG, "beep failed", e)
+        }
+    }
+
+    private fun vibrate(p: TimerPrefs.Prefs) {
+        if (p.vibration == TimerPrefs.Vibration.OFF) return
         try {
             val vib: Vibrator = if (Build.VERSION.SDK_INT >= 31) {
                 getSystemService(VibratorManager::class.java).defaultVibrator
@@ -238,7 +276,9 @@ class TimerService : Service() {
                 @Suppress("DEPRECATION")
                 getSystemService(Vibrator::class.java)
             }
-            vib.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 400, 200, 400, 200, 700), -1))
+            // repeat = 0 — повторять узор до stopAlarm()
+            vib.vibrate(VibrationEffect.createWaveform(p.vibration.pattern, 0))
+            vibrator = vib
         } catch (e: Exception) {
             Log.w(TAG, "vibrate failed", e)
         }
@@ -275,6 +315,8 @@ class TimerService : Service() {
     override fun onDestroy() {
         scope.cancel()
         stopAlarm()
+        tone?.release()
+        tone = null
         releaseWakeLock()
         super.onDestroy()
     }

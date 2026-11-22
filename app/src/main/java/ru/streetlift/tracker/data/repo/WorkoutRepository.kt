@@ -196,22 +196,6 @@ class WorkoutRepository(private val db: AppDatabase) {
 
     // ---------------- Редактор ----------------
 
-    /** 4 или 5 дней в цикле: добавляет пустой день или удаляет последние. */
-    suspend fun setCycleLength(n: Int) = db.withTransaction {
-        val target = n.coerceIn(4, 5)
-        val days = programDao.getDays()
-        if (days.size < target) {
-            for (i in days.size until target) {
-                programDao.insertDay(DayEntity(position = i, name = "День ${i + 1}", alternating = false))
-            }
-        } else if (days.size > target) {
-            days.drop(target).forEach { programDao.deleteDay(it) }
-        }
-        val s = getSettings()
-        if (s.currentDayIndex >= target) settingsDao.upsert(s.copy(currentDayIndex = 0))
-        Unit
-    }
-
     suspend fun moveDay(dayId: Long, delta: Int) = db.withTransaction {
         val days = programDao.getDays().toMutableList()
         val i = days.indexOfFirst { it.id == dayId }

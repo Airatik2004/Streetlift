@@ -84,7 +84,6 @@ class EditorViewModel(private val repo: WorkoutRepository) : ViewModel() {
         EditorUi(s, d, e.groupBy { it.dayId }.mapValues { (_, v) -> v.sortedBy { it.position } }, st)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EditorUi())
 
-    fun setCycleLength(n: Int) = viewModelScope.launch { repo.setCycleLength(n) }
     fun moveDay(id: Long, delta: Int) = viewModelScope.launch { repo.moveDay(id, delta) }
     fun updateDay(d: DayEntity) = viewModelScope.launch { repo.updateDay(d) }
     fun addExercise(dayId: Long) = viewModelScope.launch { repo.addExercise(dayId) }
@@ -105,7 +104,6 @@ fun EditorScreen(repo: WorkoutRepository) {
     val ui by vm.state.collectAsStateWithLifecycle()
     val s = ui.settings
 
-    var confirmShrink by remember { mutableStateOf(false) }
     var confirmReset by remember { mutableStateOf(false) }
     var renameDay by remember { mutableStateOf<DayEntity?>(null) }
     var editExercise by remember { mutableStateOf<ExerciseEntity?>(null) }
@@ -121,20 +119,6 @@ fun EditorScreen(repo: WorkoutRepository) {
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Тактов в цикле", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                        FilterChip(
-                            selected = ui.days.size == 4,
-                            onClick = { if (ui.days.size > 4) confirmShrink = true else vm.setCycleLength(4) },
-                            label = { Text("4 дня") },
-                        )
-                        FilterChip(
-                            selected = ui.days.size == 5,
-                            onClick = { vm.setCycleLength(5) },
-                            label = { Text("5 дней") },
-                        )
-                    }
-                    HorizontalDivider()
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("Плановая разгрузка", style = MaterialTheme.typography.titleMedium)
@@ -186,19 +170,6 @@ fun EditorScreen(repo: WorkoutRepository) {
         }
     }
 
-    if (confirmShrink) {
-        val last = ui.days.lastOrNull()
-        ConfirmDialog(
-            title = "Перейти на 4 дня?",
-            text = "«${last?.name}» и все его упражнения будут удалены. История тренировок сохранится.",
-            confirm = "Удалить день",
-            onDismiss = { confirmShrink = false },
-            onConfirm = {
-                confirmShrink = false
-                vm.setCycleLength(4)
-            },
-        )
-    }
     if (confirmReset) {
         ConfirmDialog(
             title = "Сбросить программу?",
@@ -271,7 +242,7 @@ private fun DayCard(
                         .clickable { onRename() }
                         .padding(4.dp),
                 ) {
-                    Text("Такт ${day.position + 1}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Text("День ${day.position + 1} из 4", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     Text(day.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 }
                 IconButton(onClick = { onMove(-1) }, enabled = !isFirst) {

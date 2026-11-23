@@ -2,7 +2,7 @@ package ru.streetlift.tracker.domain
 
 /**
  * Прыжки на тумбу: растёт высота. На высоте — 4 × 3 → 4 × 4 → 4 × 5; затем та же высота
- * +2,5 кг 4 × 4 → +5 кг 4 × 4; затем +5 см без веса. Две неудачи подряд — плато:
+ * +2,5 кг 4 × 4 → 4 × 5, +5 кг 4 × 4 → 4 × 5; затем +5 см без веса. Две неудачи подряд — плато:
  * +5 кг и на 10 см ниже, с весом +5 см за удачу до высоты плато, там вес снимается.
  */
 object Jumps {
@@ -48,7 +48,8 @@ object Jumps {
                 s.plateauCm != null ->
                     if (h + STEP_CM >= s.plateauCm) State(s.plateauCm, 0f, MIN_REPS)
                     else s.copy(heightCm = h + STEP_CM, fails = 0)
-                // Ступени с весом на той же высоте: +2,5 кг 4 × 4 → +5 кг 4 × 4 → +5 см без веса
+                // Ступени с весом на той же высоте: +2,5 кг 4 × 4 → 4 × 5 → +5 кг 4 × 4 → 4 × 5 → +5 см без веса
+                s.weightKg > 0f && s.reps < MAX_REPS -> s.copy(reps = s.reps + 1, fails = 0)
                 s.weightKg >= HEAVY_KG - 0.01f -> State(h + STEP_CM, 0f, MIN_REPS)
                 s.weightKg > 0f -> s.copy(weightKg = HEAVY_KG, reps = WEIGHTED_REPS, fails = 0)
                 s.reps < MAX_REPS -> s.copy(reps = s.reps + 1, fails = 0)

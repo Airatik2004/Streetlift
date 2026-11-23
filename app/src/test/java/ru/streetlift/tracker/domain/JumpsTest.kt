@@ -14,9 +14,14 @@ class JumpsTest {
         assertEquals(60, s.heightCm)
         assertEquals(2.5f, s.weightKg, 0.01f)
         assertEquals(4, s.reps)
+        s = Jumps.next(s, ok(s), false).state                  // +2.5 кг 4×5
+        assertEquals(2.5f, s.weightKg, 0.01f)
+        assertEquals(5, s.reps)
         s = Jumps.next(s, ok(s), false).state                  // +5 кг 4×4
         assertEquals(5f, s.weightKg, 0.01f)
         assertEquals(4, s.reps)
+        s = Jumps.next(s, ok(s), false).state                  // +5 кг 4×5
+        assertEquals(5, s.reps)
         s = Jumps.next(s, ok(s), false).state
         assertEquals(65, s.heightCm)
         assertEquals(0f, s.weightKg, 0.01f)

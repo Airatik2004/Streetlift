@@ -26,6 +26,8 @@ object RestTimer {
         val running: Boolean = false,
         val finished: Boolean = false,
         val label: String = "",
+        /** Шапка уведомления, напр. «подходов 5/12». */
+        val info: String = "",
     ) {
         val remainingSeconds: Int get() = ((remainingMs + 999) / 1000).toInt()
         val progress: Float get() = if (totalMs <= 0) 0f else (remainingMs.toFloat() / totalMs).coerceIn(0f, 1f)
@@ -44,7 +46,7 @@ object RestTimer {
     fun start(totalMs: Long = _state.value.totalMs, label: String = _state.value.label) {
         val t = totalMs.coerceIn(1_000, 99 * 60_000L)
         endAt = now() + t
-        _state.value = State(totalMs = t, remainingMs = t, running = true, finished = false, label = label)
+        _state.value = State(totalMs = t, remainingMs = t, running = true, finished = false, label = label, info = _state.value.info)
         launchTick()
     }
 
@@ -52,7 +54,13 @@ object RestTimer {
     fun setDuration(totalMs: Long, label: String = _state.value.label) {
         tickJob?.cancel()
         val t = totalMs.coerceIn(1_000, 99 * 60_000L)
-        _state.value = State(totalMs = t, remainingMs = t, running = false, finished = false, label = label)
+        _state.value = State(totalMs = t, remainingMs = t, running = false, finished = false, label = label, info = _state.value.info)
+    }
+
+    /** Обновить подписи (что дальше, прогресс тренировки), не трогая отсчёт. */
+    fun setInfo(label: String, info: String) {
+        val s = _state.value
+        if (s.label != label || s.info != info) _state.value = s.copy(label = label, info = info)
     }
 
     fun pause() {

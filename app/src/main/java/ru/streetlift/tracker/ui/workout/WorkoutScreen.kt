@@ -89,6 +89,16 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
 
     BackHandler { onExit() }
 
+    // Уведомление таймера: что дальше и сколько подходов сделано
+    androidx.compose.runtime.LaunchedEffect(ui.stepKey, ui.doneSets, ui.plannedSets) {
+        val cur = ui.current
+        val next = if (cur == null) "Все подходы сделаны" else {
+            val n = ui.currentSetNumber
+            "Дальше: ${cur.exercise.name} · подход $n из ${maxOf(cur.plannedCount, n)}"
+        }
+        ru.streetlift.tracker.timer.RestTimer.setInfo(next, "подходов ${ui.doneSets}/${ui.plannedSets}")
+    }
+
     if (ui.missing) {
         Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Тренировка не найдена")
@@ -172,7 +182,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                         ui = ui,
                         onLog = { w, r, rir ->
                             vm.logSet(w, r, rir) { rec ->
-                                TimerActions.start(ctx, rec.seconds * 1000L, "Дальше: следующий подход")
+                                TimerActions.start(ctx, rec.seconds * 1000L)
                             }
                         },
                         onSkip = { vm.skipCurrent() },
@@ -220,6 +230,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
             onConfirm = {
                 confirmFinish = false
                 TimerActions.reset()
+                ru.streetlift.tracker.timer.RestTimer.setInfo("", "")
                 vm.finish { summary = it.ifBlank { "Тренировка сохранена." } }
             },
         )
@@ -233,6 +244,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
             onConfirm = {
                 confirmDiscard = false
                 TimerActions.reset() // отдых больше не нужен
+                ru.streetlift.tracker.timer.RestTimer.setInfo("", "")
                 vm.discard(onExit)
             },
         )

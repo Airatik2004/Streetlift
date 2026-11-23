@@ -129,8 +129,7 @@ class TimerService : Service() {
         holdWakeLock(signalMs + 5_000)
         if (p.soundEnabled) playAlarm(p)
         vibrate(p)
-        notifySafe(DONE_ID, buildDoneNotification(st))
-        updateNotification(st)
+        updateNotification(st) // то же уведомление показывает «Отдых окончен», затем исчезает
         stopJob?.cancel()
         stopJob = scope.launch {
             delay(signalMs)
@@ -154,25 +153,33 @@ class TimerService : Service() {
     private fun updateNotification(st: RestTimer.State) {
         if (!inForeground) return
         val endWall = System.currentTimeMillis() + st.remainingMs
-        val key = "${st.running}|${st.finished}|${st.label}|${st.totalMs}|" +
-            if (st.running) "" else st.remainingSeconds.toString()
+        // Время в заголовке — обновляем раз в секунду
+        val key = "${st.running}|${st.finished}|${st.label}|${st.info}|${st.totalMs}|${st.remainingSeconds}"
         // Во время отсчёта уведомление само тикает (chronometer), обновляем только при изменениях
-        if (key == lastKey && (!st.running || abs(endWall - lastEndWall) < 1_500)) return
+        if (key == lastKey) return
         lastKey = key
         lastEndWall = endWall
         notifySafe(ONGOING_ID, buildOngoing(st))
     }
 
     private fun buildOngoing(st: RestTimer.State): Notification {
+        // Формат как у интервальных таймеров: крупно — время, ниже — что дальше, полоса прогресса
         val title = when {
-            st.finished -> "Отдых окончен — к снаряду!"
-            st.running -> "Отдых"
-            else -> "Пауза · ${Fmt.clock(st.remainingSeconds)}"
+            st.finished -> "Отдых окончен"
+            st.running -> Fmt.clock(st.remainingSeconds)
+            else -> "${Fmt.clock(st.remainingSeconds)} · пауза"
         }
+        val elapsed = ((1f - st.progress) * 1000).toInt().coerceIn(0, 1000)
         val b = NotificationCompat.Builder(this, CH_RUNNING)
             .setSmallIcon(R.drawable.ic_stat_timer)
+            .setLargeIcon(largeIcon())
             .setContentTitle(title)
-            .setContentText(st.label.ifBlank { "Таймер отдыха" })
+            .setContentText(st.label.ifBlank { "Отдых" })
+            .setSubText(st.info.ifBlank { null })
+            .setProgress(1000, if (st.finished) 1000 else elapsed, false)
+            .setColor(0xFF2196F3.toInt())
+            .setColorized(true)
+            .setShowWhen(false)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
@@ -180,19 +187,25 @@ class TimerService : Service() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(openAppIntent())
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-        if (st.running) {
-            b.setWhen(System.currentTimeMillis() + st.remainingMs)
-                .setShowWhen(true)
-                .setUsesChronometer(true)
-                .setChronometerCountDown(true)
-        } else {
-            b.setShowWhen(false)
+        if (!st.finished) {
+            b.addAction(0, if (st.running) "Пауза" else "Старт", actionIntent(ACTION_TOGGLE, 1))
+            b.addAction(0, "Стоп", actionIntent(ACTION_STOP, 3))
         }
-        b.addAction(0, if (st.running) "Пауза" else "Старт", actionIntent(ACTION_TOGGLE, 1))
-        b.addAction(0, "+15с", actionIntent(ACTION_PLUS, 2))
-        b.addAction(0, "Стоп", actionIntent(ACTION_STOP, 3))
         return b.build()
     }
+
+    private var largeIconCache: android.graphics.Bitmap? = null
+
+    private fun largeIcon(): android.graphics.Bitmap? = largeIconCache ?: runCatching {
+        ContextCompat.getDrawable(this, R.drawable.ic_dumbbell)?.let { d ->
+            val size = (48 * resources.displayMetrics.density).toInt()
+            val bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+            val c = android.graphics.Canvas(bmp)
+            d.setBounds(0, 0, size, size)
+            d.draw(c)
+            bmp
+        }
+    }.getOrNull().also { largeIconCache = it }
 
     private fun buildDoneNotification(st: RestTimer.State): Notification =
         NotificationCompat.Builder(this, CH_DONE)

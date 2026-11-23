@@ -40,6 +40,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -674,10 +675,9 @@ private fun RunDetail(info: RunInfo, onClose: () -> Unit) {
     var step by rememberSaveable { mutableStateOf(1000.0) }
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Card(Modifier.fillMaxSize().padding(8.dp)) {
-            Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
+          // Шапка и карта закреплены: карта не прокручивается (иначе рисуется поверх текста)
+          Column(Modifier.fillMaxSize()) {
+            Column(Modifier.padding(start = 14.dp, end = 14.dp, top = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(runDate(info.run), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                     TextButton(onClick = onClose) { Text("Закрыть") }
@@ -685,7 +685,9 @@ private fun RunDetail(info: RunInfo, onClose: () -> Unit) {
                 if (info.segments.isEmpty()) {
                     Text("Маршрут не записан (не было GPS)", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
-                    RouteMap(info.segments, Modifier.fillMaxWidth().height(320.dp), interactive = true, paceColors = true)
+                    Box(Modifier.fillMaxWidth().height(260.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))) {
+                        RouteMap(info.segments, Modifier.fillMaxWidth().height(260.dp), interactive = true, paceColors = true)
+                    }
                     if (info.track.size >= 2) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("быстрее", color = Color(0xFF4CAF50), style = MaterialTheme.typography.labelSmall)
@@ -694,6 +696,11 @@ private fun RunDetail(info: RunInfo, onClose: () -> Unit) {
                         }
                     }
                 }
+            }
+            Column(
+                Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
 
                 // Сводка
                 Card(Modifier.fillMaxWidth()) {
@@ -728,12 +735,13 @@ private fun RunDetail(info: RunInfo, onClose: () -> Unit) {
                 } else {
                     // Раскладка
                     Text("Раскладка", style = MaterialTheme.typography.titleMedium)
-                    ChipRow(listOf("250 м", "500 м", "1 км", "5 км"), when (step) {
+                    ChipRow(listOf("250 м", "500 м", "1 км", "5 км", "10 км"), when (step) {
                         250.0 -> "250 м"
                         500.0 -> "500 м"
                         5000.0 -> "5 км"
+                        10_000.0 -> "10 км"
                         else -> "1 км"
-                    }) { t -> step = when (t) { "250 м" -> 250.0; "500 м" -> 500.0; "5 км" -> 5000.0; else -> 1000.0 } }
+                    }) { t -> step = when (t) { "250 м" -> 250.0; "500 м" -> 500.0; "5 км" -> 5000.0; "10 км" -> 10_000.0; else -> 1000.0 } }
                     val splits = rs.splits(info.track, step)
                     if (splits.isEmpty()) {
                         Text("Пробежка короче отрезка", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -796,6 +804,7 @@ private fun RunDetail(info: RunInfo, onClose: () -> Unit) {
                     }
                 }
             }
+          }
         }
     }
 }

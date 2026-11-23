@@ -18,6 +18,7 @@ import ru.streetlift.tracker.timer.TimerPrefs
 import ru.streetlift.tracker.timer.IntervalTimer
 import ru.streetlift.tracker.timer.Stopwatch
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -467,13 +468,7 @@ private fun IntervalsPanel(iv: IntervalTimer.State) {
             )
         }
     }
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        IntervalTimer.PRESETS.forEach { (name, c) ->
-            OutlinedButton(onClick = {
-                update(prefs.copy(ivPrep = c.prep, ivWork = c.work, ivRest = c.rest, ivRounds = c.rounds))
-            }) { Text(name) }
-        }
-    }
+    IntervalPrograms(cfg) { p -> update(prefs.copy(ivPrep = p.prep, ivWork = p.work, ivRest = p.rest, ivRounds = p.rounds)) }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             IntervalStepper("Подготовка", Fmt.clock(prefs.ivPrep)) { d -> update(prefs.copy(ivPrep = (prefs.ivPrep + d * 5).coerceIn(0, 60))) }
@@ -582,5 +577,64 @@ fun SignalSettingsCard() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+/** Свои программы интервалов: тап — загрузить, долгое нажатие — удалить, «+» — сохранить текущие настройки. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun IntervalPrograms(current: IntervalTimer.Config, onLoad: (TimerPrefs.IntervalProgram) -> Unit) {
+    val ctx = LocalContext.current
+    var programs by remember { mutableStateOf(TimerPrefs.loadPrograms(ctx)) }
+    var adding by remember { mutableStateOf(false) }
+    var toDelete by remember { mutableStateOf<TimerPrefs.IntervalProgram?>(null) }
+
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Программы", style = MaterialTheme.typography.bodyMedium)
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            programs.forEach { p ->
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.combinedClickable(onClick = { onLoad(p) }, onLongClick = { toDelete = p }),
+                ) {
+                    Text(p.name, Modifier.padding(horizontal = 14.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.primary)
+                }
+            }
+            FilledTonalButton(onClick = { adding = true }) { Text("+ Своя") }
+        }
+        Text(
+            "Тап — загрузить, долгое нажатие — удалить. «+ Своя» сохраняет текущие подготовку/работу/отдых/раунды.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    if (adding) {
+        ru.streetlift.tracker.ui.common.TextInputDialog(
+            title = "Название программы",
+            initial = "${Fmt.clock(current.work)}/${Fmt.clock(current.rest)} × ${current.rounds}",
+            onDismiss = { adding = false },
+            onConfirm = { name ->
+                adding = false
+                if (name.isNotBlank()) {
+                    programs = programs + TimerPrefs.IntervalProgram(name.trim(), current.prep, current.work, current.rest, current.rounds)
+                    TimerPrefs.savePrograms(ctx, programs)
+                }
+            },
+        )
+    }
+    toDelete?.let { p ->
+        ru.streetlift.tracker.ui.common.ConfirmDialog(
+            title = "Удалить программу?",
+            text = p.name,
+            confirm = "Удалить",
+            onDismiss = { toDelete = null },
+            onConfirm = {
+                programs = programs - p
+                TimerPrefs.savePrograms(ctx, programs)
+                toDelete = null
+            },
+        )
     }
 }

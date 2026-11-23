@@ -30,6 +30,31 @@ object TimerPrefs {
         val ivRounds: Int = 5,
     )
 
+    /** Программа интервалов (свои + стартовые). */
+    data class IntervalProgram(val name: String, val prep: Int, val work: Int, val rest: Int, val rounds: Int)
+
+    private val DEFAULT_PROGRAMS = listOf(
+        IntervalProgram("Статика 15/45 × 5", 5, 15, 45, 5),
+        IntervalProgram("EMOM 1:00 × 10", 5, 60, 0, 10),
+        IntervalProgram("Растяжка 45/15 × 6", 5, 45, 15, 6),
+    )
+
+    fun loadPrograms(context: Context): List<IntervalProgram> {
+        val raw = context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString("ivPrograms", null)
+            ?: return DEFAULT_PROGRAMS
+        return raw.lines().filter { it.isNotBlank() }.mapNotNull { line ->
+            val p = line.split('|')
+            if (p.size != 5) null else runCatching {
+                IntervalProgram(p[0], p[1].toInt(), p[2].toInt(), p[3].toInt(), p[4].toInt())
+            }.getOrNull()
+        }
+    }
+
+    fun savePrograms(context: Context, list: List<IntervalProgram>) {
+        val raw = list.joinToString("\n") { "${it.name.replace('|', '/').replace('\n', ' ')}|${it.prep}|${it.work}|${it.rest}|${it.rounds}" }
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putString("ivPrograms", raw).apply()
+    }
+
     private const val FILE = "timer_signal"
 
     fun load(context: Context): Prefs {

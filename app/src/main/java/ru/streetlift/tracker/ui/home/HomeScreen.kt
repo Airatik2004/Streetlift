@@ -223,11 +223,6 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
             }
         }
 
-        // --- Приоритет (над карточкой дня) ---
-        item {
-            ru.streetlift.tracker.ui.common.PrioritySwitch(s.priorityMode, s.priority) { vm.setPriority(it) }
-        }
-
         // --- Прогноз следующей тренировки ---
         ui.nextDay?.let { day ->
             item {

@@ -311,6 +311,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
     logToDelete?.let { log ->
         SetEditDialog(
             log = log,
+            scale = ui.blocks.firstOrNull { it.exercise.id == log.exerciseId }?.exercise?.loadScale,
             onDismiss = { logToDelete = null },
             onSave = {
                 ActiveWorkout.updateLog(ctx, it)
@@ -408,7 +409,7 @@ private fun WorkPanel(
             onDismiss = { editWeight = false },
             onConfirm = { t ->
                 // Резины — к ближайшему сочетанию; где резин нет — не ниже 0
-                parseSignedFloat(t)?.let { onWeight(cur.exercise.loadScale.snap(ProgressionEngine.roundWeight(it))) }
+                parseSignedFloat(t)?.let { onWeight(cur.exercise.loadScale.snapManual(ProgressionEngine.roundWeight(it))) }
                 editWeight = false
             },
         )

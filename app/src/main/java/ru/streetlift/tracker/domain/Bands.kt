@@ -103,6 +103,10 @@ data class LoadScale(val step: Float, val assists: List<Float>?) {
         else -> assists.minByOrNull { abs(it - w) } ?: 0f
     }
 
+    /** Ручной ввод: отягощение — к ближайшему кратному шагу, помощь — к ближайшему сочетанию резин. */
+    fun snapManual(w: Float): Float =
+        if (w > 0f) ProgressionEngine.roundWeight(kotlin.math.round(w / st) * st) else snap(w)
+
     /** Ближайшее допустимое значение к [target], строго легче [w]; null — легче некуда. Только при [assists] != null. */
     fun lighterNear(w: Float, target: Float): Float? {
         val cands = ArrayList<Float>(assists.orEmpty())

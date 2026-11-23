@@ -35,6 +35,8 @@ fun SetEditDialog(
     onDismiss: () -> Unit,
     onSave: (SetLogEntity) -> Unit,
     onDelete: (SetLogEntity) -> Unit,
+    /** Шкала упражнения: вес округляется до шага / сочетания резин. */
+    scale: ru.streetlift.tracker.domain.LoadScale? = null,
 ) {
     var weight by remember { mutableStateOf(Fmt.weightValue(log.weightKg)) }
     var reps by remember { mutableStateOf(log.reps.toString()) }
@@ -96,7 +98,7 @@ fun SetEditDialog(
                 enabled = w != null && r != null,
                 onClick = {
                     if (w != null && r != null) {
-                        onSave(log.copy(weightKg = ProgressionEngine.roundWeight(w), reps = r, rir = rir))
+                        onSave(log.copy(weightKg = ProgressionEngine.roundWeight(w).let { scale?.snapManual(it) ?: it }, reps = r, rir = rir))
                     }
                 },
             ) { Text("Сохранить") }

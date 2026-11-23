@@ -58,6 +58,8 @@ class TimerService : Service() {
     private var vibrator: Vibrator? = null
     private var tone: ToneGenerator? = null
     private var lastBeepSec = -1
+    /** onStartCommand уже ушёл в foreground. До этого останавливаться нельзя — иначе вылет. */
+    private var started = false
     private var soundPool: SoundPool? = null
     private var gongId = 0
     private var pipId = 0
@@ -112,6 +114,7 @@ class TimerService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Всегда сначала уходим в foreground — иначе система убьёт сервис.
         goForeground(RestTimer.state.value)
+        started = true
         prefs = TimerPrefs.load(this)
         when (intent?.action) {
             ACTION_PREV -> ActiveWorkout.prev(this)
@@ -500,6 +503,9 @@ class TimerService : Service() {
     }
 
     private fun shutdown() {
+        // Сервис запущен через startForegroundService: остановка до startForeground роняет приложение.
+        // Решение «нужен ли сервис» примет onStartCommand.
+        if (!started) return
         releaseWakeLock()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         inForeground = false

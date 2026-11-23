@@ -159,16 +159,26 @@ class RunService : Service() {
         startBaro()
         if (ticker == null) {
             ticker = scope.launch {
-                if (RunTracker.state.value.phase == RunTracker.Phase.COUNTDOWN) {
+                val st0 = RunTracker.state.value
+                if (st0.phase == RunTracker.Phase.COUNTDOWN && st0.countdown <= 3) {
                     // Разбудить звук до первого пика отсчёта
                     ru.streetlift.tracker.timer.SignalPlayer.warmUp(this@RunService)
                     delay(400)
                 }
                 while (isActive && RunTracker.state.value.active) {
                     val s = RunTracker.state.value
-                    if (s.phase == RunTracker.Phase.COUNTDOWN) ru.streetlift.tracker.timer.Beeper.pip()
+                    val counting = s.phase == RunTracker.Phase.COUNTDOWN
+                    // Пик только на 3, 2, 1; раньше — молча, цифры на экране и в шторке
+                    if (counting && s.countdown <= 3) ru.streetlift.tracker.timer.Beeper.pip()
                     getSystemService(NotificationManager::class.java).notify(NOTIF_ID, build())
-                    delay(1000)
+                    if (counting && s.countdown == 4) {
+                        // За полсекунды до первого пика — разбудить звук (после тишины он «засыпает»)
+                        delay(500)
+                        ru.streetlift.tracker.timer.SignalPlayer.warmUp(this@RunService)
+                        delay(500)
+                    } else {
+                        delay(1000)
+                    }
                     // Отсчёт закончился — свисток, бег пошёл
                     if (RunTracker.tickCountdown()) ru.streetlift.tracker.timer.Beeper.whistle()
                     if (ru.streetlift.tracker.timer.TimerPrefs.load(this@RunService).runAutoPause) RunTracker.checkAutoPause()

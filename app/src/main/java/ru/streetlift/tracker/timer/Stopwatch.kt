@@ -52,17 +52,29 @@ object Stopwatch {
         beepEvery = prefs.stopwatchBeepEvery
         val delaySec = if (s.elapsedMs == 0L) prefs.stopwatchDelay else 0
         job?.cancel()
+        // Отсчёт виден сразу: сервис должен застать секундомер уже активным, иначе он
+        // тут же останавливается, не успев уйти в foreground, и приложение вылетает.
+        if (delaySec > 0) _state.value = _state.value.copy(countdown = delaySec, owner = owner)
         TimerService.ensureRunning(context)
         val fromZero = s.elapsedMs == 0L
         job = scope.launch {
             if (delaySec > 0) {
-                // Разбудить звук заранее, чтобы первый пик отсчёта не пропал
-                SignalPlayer.warmUp(context)
-                delay(400)
+                // Пик только на 3, 2, 1; раньше — молча, просто цифры.
+                // Звук будим заранее, чтобы первый пик не пропал
+                if (delaySec <= 3) {
+                    SignalPlayer.warmUp(context)
+                    delay(400)
+                }
                 for (left in delaySec downTo 1) {
                     _state.value = _state.value.copy(countdown = left, owner = owner)
-                    Beeper.pip()
-                    delay(1_000)
+                    if (left <= 3) Beeper.pip()
+                    if (left == 4) {
+                        delay(500)
+                        SignalPlayer.warmUp(context)
+                        delay(500)
+                    } else {
+                        delay(1_000)
+                    }
                 }
             }
             // Свисток — только при старте с нуля, не после паузы

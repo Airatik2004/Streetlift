@@ -171,7 +171,7 @@ fun EditorScreen(repo: WorkoutRepository) {
                         Column(Modifier.weight(1f)) {
                             Text("Плановая разгрузка", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "каждый ${s.deloadEvery}-й круг",
+                                "каждый ${s.deloadEvery}-й цикл",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -187,7 +187,7 @@ fun EditorScreen(repo: WorkoutRepository) {
                     val globalDeload = ru.streetlift.tracker.domain.ProgressionEngine.isGlobalDeload(s.cycleInMeso, s.deloadEvery, s.deloadOverride)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("Разгрузка на этот круг", style = MaterialTheme.typography.titleMedium)
+                            Text("Разгрузка на этот цикл", style = MaterialTheme.typography.titleMedium)
                             Text(
                                 "все упражнения: вес 100%, подходы −50% (мин. 2), RIR 3–4",
                                 style = MaterialTheme.typography.bodySmall,
@@ -283,7 +283,7 @@ private fun CalibrationDialog(
                     )
                     if (stageChanged) {
                         Text(
-                            "История «${exercise.leverageStage}» уйдёт в архив, упражнение на 1 круг перейдёт в калибровку.",
+                            "История «${exercise.leverageStage}» уйдёт в архив, упражнение на 1 цикл перейдёт в калибровку.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                         )

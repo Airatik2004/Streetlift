@@ -256,7 +256,7 @@ object ProgressionEngine {
                 msg = if (ceiling) {
                     "потолок стадии достигнут — можно переходить на следующую стадию в редакторе цикла"
                 } else {
-                    "${config.maxSets} × ${config.maxReps} закрыто (1 из 2 кругов до потолка стадии), вес ${Fmt.weight(work)}"
+                    "${config.maxSets} × ${config.maxReps} закрыто (1 из 2 циклов до потолка стадии), вес ${Fmt.weight(work)}"
                 }
             }
 
@@ -325,7 +325,7 @@ object ProgressionEngine {
             }
         }
 
-        val fullMsg = if (emergency) "$msg. Показатели падают 2 круга подряд → следующий круг — разгрузка для упражнения" else msg
+        val fullMsg = if (emergency) "$msg. Показатели падают 2 цикла подряд → следующий цикл — разгрузка для упражнения" else msg
         return ProgressionResult(next, decision, emergency, fullMsg)
     }
 

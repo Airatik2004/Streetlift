@@ -123,7 +123,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
         if (!ui.loaded) {
             AlertDialog(
                 onDismissRequest = {},
-                title = { Text("План на следующий круг") },
+                title = { Text("План на следующий цикл") },
                 text = { Text(text) },
                 confirmButton = {
                     TextButton(onClick = {
@@ -282,7 +282,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
             text = if (left > 0) {
                 "Осталось подходов: $left. Подходов меньше плана — вес не вырастет, и это засчитается как утомление."
             } else {
-                "План на следующий круг будет пересчитан."
+                "План на следующий цикл будет пересчитан."
             },
             confirm = "Завершить",
             onDismiss = { confirmFinish = false },
@@ -325,7 +325,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
     summary?.let { text ->
         AlertDialog(
             onDismissRequest = {},
-            title = { Text("План на следующий круг") },
+            title = { Text("План на следующий цикл") },
             text = { Text(text) },
             confirmButton = {
                 TextButton(onClick = {

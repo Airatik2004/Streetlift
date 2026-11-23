@@ -194,10 +194,10 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
                     ui.phase != PeakPhase.NONE -> "подводка к старту"
                     ui.globalDeload -> "разгрузка"
                     left == 0 -> "плановая разгрузка отменена"
-                    else -> "разгрузка через $left ${plural(left, "круг", "круга", "кругов")}"
+                    else -> "разгрузка через $left ${plural(left, "цикл", "цикла", "циклов")}"
                 }
                 Text(
-                    "Круг ${s.cycleInMeso.coerceAtMost(s.deloadEvery)} из ${s.deloadEvery} · " +
+                    "Цикл ${s.cycleInMeso.coerceAtMost(s.deloadEvery)} из ${s.deloadEvery} · " +
                         "день ${ui.nextDayIndex + 1} из ${ui.days.size} · $deloadText",
                     style = MaterialTheme.typography.bodyLarge,
                     color = if (ui.globalDeload) DeloadGreen else MaterialTheme.colorScheme.onSurfaceVariant,

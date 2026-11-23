@@ -196,7 +196,7 @@ fun HistoryScreen(repo: WorkoutRepository) {
                             )
                             Text(
                                 "${formatDateTime(a.archivedAt)} · было ${Fmt.weight(a.weightKg)}, " +
-                                    "${a.plannedSets} подх., цель ${a.targetReps}+, кругов на весе: ${a.roundsAtWeight}",
+                                    "${a.plannedSets} подх., цель ${a.targetReps}+, циклов на весе: ${a.roundsAtWeight}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -229,7 +229,7 @@ fun HistoryScreen(repo: WorkoutRepository) {
                         Column(Modifier.weight(1f)) {
                             Text(s.dayName, style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "${formatDateTime(s.startedAt)} · круг ${s.roundNumber}",
+                                "${formatDateTime(s.startedAt)} · цикл ${s.roundNumber}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -304,7 +304,7 @@ fun HistoryScreen(repo: WorkoutRepository) {
         ConfirmDialog(
             title = "Удалить тренировку?",
             text = "${s.dayName}, ${formatDateTime(s.startedAt)}. " + if (s.id == rollbackableId) {
-                "Это последняя тренировка: день цикла, круг, веса и подходы вернутся к состоянию до неё."
+                "Это последняя тренировка: день цикла, номер цикла, веса и подходы вернутся к состоянию до неё."
             } else {
                 "Запись удалится только из истории — план цикла не изменится (на неё уже опираются более поздние тренировки)."
             },

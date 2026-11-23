@@ -101,7 +101,7 @@ fun SetupScreen(repo: WorkoutRepository) {
                 Text("Настройка стартовых параметров", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text(
                     "Для каждого упражнения введите известный рабочий вес (+10, 0, −15 кг) " +
-                        "или включите «Подобрать на тренировке» — тогда первый круг пройдёт в режиме калибровки: " +
+                        "или включите «Подобрать на тренировке» — тогда первый цикл пройдёт в режиме калибровки: " +
                         "вы подберёте вес под коридор повторений с запасом 2 и запишете 3 рабочих подхода.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

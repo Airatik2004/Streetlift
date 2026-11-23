@@ -206,9 +206,9 @@ class WorkoutRepository(private val db: AppDatabase) {
         )
         if (adv.roundCompleted) {
             lines += if (adv.wasDeloadRound) {
-                "Круг завершён. Разгрузка позади — новый мезоцикл, круг 1 из ${s.deloadEvery}."
+                "Цикл завершён. Разгрузка позади — новый мезоцикл, цикл 1 из ${s.deloadEvery}."
             } else {
-                "Круг завершён. Следующий — ${adv.state.cycleInMeso} из ${s.deloadEvery}" +
+                "Цикл завершён. Следующий — ${adv.state.cycleInMeso} из ${s.deloadEvery}" +
                     if (adv.state.cycleInMeso >= s.deloadEvery) " (плановая разгрузка)." else "."
             }
         }

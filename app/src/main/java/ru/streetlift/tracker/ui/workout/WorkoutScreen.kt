@@ -194,7 +194,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
             Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 when {
                     cur == null -> {
-                        Text("Все подходы сделаны 💪", style = MaterialTheme.typography.titleLarge)
+                        Text("Все подходы сделаны", style = MaterialTheme.typography.titleLarge)
                         Spacer(Modifier.height(10.dp))
                         // Всё сделано — завершаем сразу, без подтверждения
                         Button(onClick = {
@@ -248,7 +248,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                             )
                             if (log != null) {
                                 Text(
-                                    "${Fmt.weightValue(log.weightKg)} × ${log.reps}${if (log.isSeconds) " с" else ""} · ${Fmt.rirValue(log.rir)} ✓",
+                                    "${Fmt.weightValue(log.weightKg)} × ${log.reps}${if (log.isSeconds) " с" else ""} · ${Fmt.rirValue(log.rir)}",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = DeloadGreen,
                                 )

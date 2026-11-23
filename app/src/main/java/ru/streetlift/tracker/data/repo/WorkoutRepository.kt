@@ -338,7 +338,7 @@ class WorkoutRepository(private val db: AppDatabase) {
             val finishedIds = sessionDao.getAllSessions().filter { it.finishedAt != null || it.id == sessionId }.map { it.id }.toSet()
             val entries = recordEntries(sessionDao.getAllSets().filter { it.sessionId in finishedIds }, statsDao.getManual())
             ru.streetlift.tracker.domain.Records.newRecords(entries, sessionId).forEach { r ->
-                lines += "🏆 Рекорд: ${r.name}${r.stage?.let { " ($it)" } ?: ""} — ${Fmt.weight(r.weight)} × ${r.value}${if (r.isSeconds) " с" else ""}"
+                lines += "Рекорд: ${r.name}${r.stage?.let { " ($it)" } ?: ""} — ${Fmt.weight(r.weight)} × ${r.value}${if (r.isSeconds) " с" else ""}"
             }
         }
         val summary = lines.joinToString("\n")

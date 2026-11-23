@@ -63,11 +63,11 @@ fun RunPanel() {
     }
     // Где мы сейчас — пока маршрута нет, карта показывает последнюю известную точку
     val last = remember(st.phase) {
-        if (!hasPermission()) null else runCatching {
+        (if (!hasPermission()) null else runCatching {
             val lm = ctx.getSystemService(LocationManager::class.java)
             (lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER))
                 ?.let { RunTracker.Pt(it.latitude, it.longitude) }
-        }.getOrNull()
+        }.getOrNull()) ?: RunTracker.Pt(55.7558, 37.6173) // пока неизвестно — Москва
     }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {

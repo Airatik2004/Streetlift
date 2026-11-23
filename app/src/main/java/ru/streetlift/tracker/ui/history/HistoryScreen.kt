@@ -127,7 +127,7 @@ class HistoryViewModel(private val repo: WorkoutRepository) : ViewModel() {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun HistoryScreen(repo: WorkoutRepository) {
+fun HistoryScreen(repo: WorkoutRepository, focusSessionId: Long? = null, onFocused: () -> Unit = {}) {
     val vm: HistoryViewModel = viewModel(factory = viewModelFactory { initializer { HistoryViewModel(repo) } })
     val history by vm.items.collectAsStateWithLifecycle()
     val archive by vm.archive.collectAsStateWithLifecycle()
@@ -139,6 +139,17 @@ fun HistoryScreen(repo: WorkoutRepository) {
     var toDelete by remember { mutableStateOf<SessionEntity?>(null) }
     var editSet by remember { mutableStateOf<SetLogEntity?>(null) }
     var expanded by remember { mutableStateOf(setOf<Long>()) }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    // Переход из графика: раскрыть и прокрутить к нужной тренировке
+    androidx.compose.runtime.LaunchedEffect(focusSessionId, history) {
+        val id = focusSessionId ?: return@LaunchedEffect
+        val pos = history.indexOfFirst { it.session.id == id }
+        if (pos < 0) return@LaunchedEffect
+        expanded = expanded + id
+        val before = 1 + (if (archive.isNotEmpty()) 1 else 0)
+        listState.scrollToItem(before + pos)
+        onFocused()
+    }
 
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) vm.export(ctx.contentResolver, uri, toast)
@@ -149,6 +160,7 @@ fun HistoryScreen(repo: WorkoutRepository) {
 
     LazyColumn(
         Modifier.fillMaxSize(),
+        state = listState,
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {

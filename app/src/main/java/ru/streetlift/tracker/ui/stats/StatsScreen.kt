@@ -119,6 +119,10 @@ fun StatsScreen(repo: WorkoutRepository) {
     var name by rememberSaveable { mutableStateOf<String?>(null) }
     var stage by rememberSaveable { mutableStateOf<String?>(null) }
     var stageSet by rememberSaveable { mutableStateOf(false) }
+    // Период графика (null — весь) и переход к тренировке в истории
+    var from by rememberSaveable { mutableStateOf<Long?>(null) }
+    var to by rememberSaveable { mutableStateOf<Long?>(null) }
+    var focus by remember { mutableStateOf<Long?>(null) }
 
     Column(Modifier.fillMaxSize()) {
         PrimaryTabRow(selectedTabIndex = tab) {
@@ -128,7 +132,7 @@ fun StatsScreen(repo: WorkoutRepository) {
         }
         Box(Modifier.weight(1f)) {
             when (tab) {
-                0 -> HistoryScreen(repo)
+                0 -> HistoryScreen(repo, focus) { focus = null }
                 1, 2 -> {
                     val names = (ui.exercises.map { it.name } + ui.entries.map { it.name }).distinct()
                     val sel = name?.takeIf { it in names } ?: names.firstOrNull()
@@ -150,7 +154,11 @@ fun StatsScreen(repo: WorkoutRepository) {
                         } else if (tab == 1) {
                             RecordsTab(ui, vm, sel, selStage)
                         } else {
-                            ChartTab(ui, sel, selStage)
+                            ChartTab(
+                                ui, vm, sel, selStage, from, to,
+                                onRange = { f, t -> from = f; to = t },
+                                onOpenSession = { focus = it; tab = 0 },
+                            )
                         }
                     }
                 }
@@ -180,7 +188,7 @@ private fun RecordsTab(ui: StatsUi, vm: StatsViewModel, name: String, stage: Str
     var toDelete by remember { mutableStateOf<Long?>(null) }
 
     Text(
-        "Лучший один подход при каждом весе${if (seconds) " (секунды)" else ""}. Долгое нажатие на ✎ — удалить.",
+        "Лучший один подход при каждом весе${if (seconds) " (секунды)" else ""}. Зелёным — введённые вручную; долгое нажатие — удалить.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -208,11 +216,15 @@ private fun RecordsTab(ui: StatsUi, vm: StatsViewModel, name: String, stage: Str
                                 Text("—", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             } else {
                                 Text(
-                                    "${b.value}${if (seconds) " с" else ""}${if (b.manualId != null) " ✎" else ""}",
+                                    "${b.value}${if (seconds) " с" else ""}",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.SemiBold,
+                                    color = if (b.manualId != null) ManualGreen else Color.Unspecified,
                                 )
                                 Text(day(b.epochDay), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (b.manualId != null) {
+                                    Text("вручную", style = MaterialTheme.typography.labelSmall, color = ManualGreen)
+                                }
                             }
                         }
                     }
@@ -328,97 +340,225 @@ private fun AddRecordDialog(
 
 // ---------------- Графики ----------------
 
+private val ManualGreen = Color(0xFF4CAF50)
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-private fun ChartTab(ui: StatsUi, name: String, stage: String?) {
+private fun ChartTab(
+    ui: StatsUi,
+    vm: StatsViewModel,
+    name: String,
+    stage: String?,
+    from: Long?,
+    to: Long?,
+    onRange: (Long?, Long?) -> Unit,
+    onOpenSession: (Long) -> Unit,
+) {
     val weights = Records.weights(ui.entries, name, stage)
     var wKey by rememberSaveable(name, stage) { mutableStateOf<Int?>(null) }
     val w = weights.firstOrNull { Records.key(it) == wKey } ?: weights.firstOrNull()
-    var sum by rememberSaveable { mutableStateOf(false) }
     val seconds = ui.entries.firstOrNull { it.name == name }?.isSeconds ?: false
+    val unit = if (seconds) " с" else ""
+    var picking by remember { mutableStateOf<Int?>(null) } // 0 — «с», 1 — «по»
+    var toDelete by remember { mutableStateOf<Long?>(null) }
+    var picked by remember(name, stage, w, from, to) { mutableStateOf<Long?>(null) }
+
     if (w == null) {
         Text("Нет подходов", color = MaterialTheme.colorScheme.onSurfaceVariant)
         return
     }
     ChipRow(weights.map { Fmt.weight(it) }, Fmt.weight(w)) { label -> wKey = weights.firstOrNull { Fmt.weight(it) == label }?.let { Records.key(it) } }
-    ChipRow(listOf("Лучший подход", "Сумма повторов"), if (sum) "Сумма повторов" else "Лучший подход") { sum = it == "Сумма повторов" }
-    val pts = Records.series(ui.entries, name, stage, w, sum)
+
+    // Период: по умолчанию — весь, за который есть данные
+    val allDays = ui.entries.filter { it.name == name && it.stage == stage && it.weightKey == Records.key(w) }.map { it.epochDay }
+    val minDay = allDays.minOrNull() ?: LocalDate.now().toEpochDay()
+    val maxDay = allDays.maxOrNull() ?: LocalDate.now().toEpochDay()
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(onClick = { picking = 0 }, modifier = Modifier.weight(1f)) { Text("С: ${day(from ?: minDay)}") }
+        OutlinedButton(onClick = { picking = 1 }, modifier = Modifier.weight(1f)) { Text("По: ${day(to ?: maxDay)}") }
+    }
+    if (from != null || to != null) {
+        TextButton(onClick = { onRange(null, null) }) { Text("Весь период") }
+    }
+
+    val pts = Records.series(ui.entries, name, stage, w, from, to)
+    val rows = Records.history(ui.entries, name, stage, w, from, to)
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
-            LineChart(pts, if (seconds) " с" else "")
+            if (pts.isEmpty()) {
+                Text("Нет подходов за этот период", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                LineChart(pts, unit, picked) { picked = it }
+            }
         }
     }
     Text(
-        if (sum) "Сумма всех подходов с этим весом за тренировку." else "Лучший подход с этим весом за тренировку; ✎ — рекорды, введённые вручную.",
+        "Лучший подход с этим весом за тренировку. Зелёные точки — рекорды, введённые вручную.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+
+    // История при этом весе за период: тренировка — открыть в «Истории», ручной рекорд — удалить
+    if (rows.isNotEmpty()) {
+        Text("История", style = MaterialTheme.typography.titleMedium)
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(vertical = 4.dp)) {
+                rows.forEachIndexed { i, r ->
+                    if (i > 0) HorizontalDivider()
+                    val manual = r.manualId != null
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .combinedClickable(onClick = {
+                                picked = r.epochDay
+                                if (manual) toDelete = r.manualId else r.sessionId?.let(onOpenSession)
+                            })
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(day(r.epochDay), Modifier.weight(0.9f), style = MaterialTheme.typography.bodyMedium)
+                        Row(Modifier.weight(2f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            val bestIdx = r.values.indexOf(r.best)
+                            r.values.forEachIndexed { k, v ->
+                                Text(
+                                    "$v${if (k < r.values.size - 1) "," else ""}",
+                                    fontWeight = if (k == bestIdx) FontWeight.Bold else FontWeight.Normal,
+                                    color = when {
+                                        manual -> ManualGreen
+                                        k == bestIdx -> MaterialTheme.colorScheme.primary
+                                        else -> MaterialTheme.colorScheme.onSurface
+                                    },
+                                )
+                            }
+                            if (manual) Text("вручную", color = ManualGreen, style = MaterialTheme.typography.labelMedium)
+                        }
+                        Text(
+                            if (manual) "удалить" else "открыть",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    picking?.let { which ->
+        val today = LocalDate.now().toEpochDay()
+        val init = if (which == 0) from ?: minDay else to ?: maxDay
+        val state = androidx.compose.material3.rememberDatePickerState(
+            initialSelectedDateMillis = init * 86_400_000L,
+            selectableDates = object : androidx.compose.material3.SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                    val d = utcTimeMillis / 86_400_000L
+                    return d <= today && if (which == 0) d <= (to ?: today) else d >= (from ?: Long.MIN_VALUE)
+                }
+            },
+        )
+        androidx.compose.material3.DatePickerDialog(
+            onDismissRequest = { picking = null },
+            confirmButton = {
+                TextButton(onClick = {
+                    state.selectedDateMillis?.let { ms ->
+                        val d = ms / 86_400_000L
+                        if (which == 0) onRange(d, to) else onRange(from, d)
+                    }
+                    picking = null
+                }) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { picking = null }) { Text("Отмена") } },
+        ) { androidx.compose.material3.DatePicker(state = state) }
+    }
+    toDelete?.let { id ->
+        AlertDialog(
+            onDismissRequest = { toDelete = null },
+            title = { Text("Удалить рекорд?") },
+            text = { Text("Рекорд, введённый вручную, будет удалён.") },
+            confirmButton = { TextButton(onClick = { vm.deleteManual(id); toDelete = null }) { Text("Удалить") } },
+            dismissButton = { TextButton(onClick = { toDelete = null }) { Text("Отмена") } },
+        )
+    }
 }
 
-/** Простой линейный график по датам; нажатие — значение ближайшей точки. */
+/** Линейный график по датам: значения слева, даты снизу; нажатие — ближайшая точка. */
 @Composable
-private fun LineChart(points: List<Records.Point>, unit: String) {
+private fun LineChart(points: List<Records.Point>, unit: String, pickedDay: Long?, onPick: (Long) -> Unit) {
     val primary = MaterialTheme.colorScheme.primary
     val grid = MaterialTheme.colorScheme.outlineVariant
-    val manualColor = MaterialTheme.colorScheme.tertiary
-    var picked by remember(points) { mutableStateOf<Records.Point?>(points.lastOrNull()) }
-    if (points.isEmpty()) {
-        Text("Нет точек", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        return
-    }
+    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
     val minX = points.first().epochDay
     val maxX = points.last().epochDay
-    val minY = points.minOf { it.value }
-    val maxY = points.maxOf { it.value }
+    val rawMin = points.minOf { it.value }
+    val rawMax = points.maxOf { it.value }
+    // Запас сверху и снизу и «круглые» деления
+    val span = (rawMax - rawMin).coerceAtLeast(4)
+    val stepY = listOf(1, 2, 5, 10, 20, 50).firstOrNull { span / it <= 5 } ?: 100
+    val minY = ((rawMin - 1) / stepY * stepY).coerceAtLeast(0)
+    val maxY = ((rawMax + stepY) / stepY) * stepY
+    val ticks = (minY..maxY step stepY).toList()
+    val pick = points.lastOrNull { it.epochDay == pickedDay } ?: points.last()
+    val chartH = 340.dp
+
     Row(verticalAlignment = Alignment.Top) {
-        Column(Modifier.height(200.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            Text("$maxY", style = MaterialTheme.typography.labelSmall)
-            Text("$minY", style = MaterialTheme.typography.labelSmall)
+        // Подписи значений
+        Box(Modifier.height(chartH).padding(end = 6.dp)) {
+            Column(Modifier.height(chartH), verticalArrangement = Arrangement.SpaceBetween) {
+                ticks.reversed().forEach { Text("$it", style = MaterialTheme.typography.labelSmall, color = labelColor) }
+            }
         }
-        Spacer(Modifier.padding(start = 6.dp))
         Canvas(
-            Modifier.weight(1f).height(200.dp).pointerInput(points) {
+            Modifier.weight(1f).height(chartH).pointerInput(points) {
                 detectTapGestures { off ->
-                    val w = size.width.toFloat()
-                    picked = points.minByOrNull {
-                        val x = if (maxX == minX) w / 2 else (it.epochDay - minX).toFloat() / (maxX - minX) * w
+                    val wpx = size.width.toFloat()
+                    points.minByOrNull {
+                        val x = if (maxX == minX) wpx / 2 else (it.epochDay - minX).toFloat() / (maxX - minX) * wpx
                         kotlin.math.abs(x - off.x)
-                    }
+                    }?.let { onPick(it.epochDay) }
                 }
             },
         ) {
-            val pad = 8.dp.toPx()
-            fun xy(p: Records.Point): Offset {
-                val x = if (maxX == minX) size.width / 2 else (p.epochDay - minX).toFloat() / (maxX - minX) * (size.width - 2 * pad) + pad
-                val y = if (maxY == minY) size.height / 2 else size.height - pad - (p.value - minY).toFloat() / (maxY - minY) * (size.height - 2 * pad)
-                return Offset(x, y)
-            }
-            listOf(0f, 0.5f, 1f).forEach { f ->
-                drawLine(grid, Offset(0f, pad + f * (size.height - 2 * pad)), Offset(size.width, pad + f * (size.height - 2 * pad)), 1f)
-            }
-            val line = points.filter { !it.manual }
-            if (line.size >= 2) {
+            val padX = 10.dp.toPx()
+            val padY = 8.dp.toPx()
+            fun xOf(d: Long) = if (maxX == minX) size.width / 2 else (d - minX).toFloat() / (maxX - minX) * (size.width - 2 * padX) + padX
+            fun yOf(v: Int) = size.height - padY - (v - minY).toFloat() / (maxY - minY) * (size.height - 2 * padY)
+            ticks.forEach { t -> drawLine(grid, Offset(0f, yOf(t)), Offset(size.width, yOf(t)), 1f) }
+            if (points.size >= 2) {
                 val path = Path()
-                line.forEachIndexed { i, p -> xy(p).let { if (i == 0) path.moveTo(it.x, it.y) else path.lineTo(it.x, it.y) } }
-                drawPath(path, primary, style = Stroke(width = 3.dp.toPx()))
+                points.forEachIndexed { i, p -> if (i == 0) path.moveTo(xOf(p.epochDay), yOf(p.value)) else path.lineTo(xOf(p.epochDay), yOf(p.value)) }
+                drawPath(path, primary, style = Stroke(width = 4.dp.toPx()))
             }
             points.forEach { p ->
-                drawCircle(if (p.manual) manualColor else primary, radius = if (p == picked) 7.dp.toPx() else 4.dp.toPx(), center = xy(p))
+                val c = Offset(xOf(p.epochDay), yOf(p.value))
+                drawCircle(if (p.manual) ManualGreen else primary, radius = 6.dp.toPx(), center = c)
             }
-            picked?.let { drawCircle(Color.White, radius = 2.dp.toPx(), center = xy(it)) }
+            val c = Offset(xOf(pick.epochDay), yOf(pick.value))
+            drawCircle(Color.White, radius = 9.dp.toPx(), center = c, style = Stroke(width = 3.dp.toPx()))
         }
     }
-    Row(Modifier.fillMaxWidth()) {
-        Text(day(minX), style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
-        Text(day(maxX), style = MaterialTheme.typography.labelSmall)
+    // Даты снизу: 4 подписи равномерно по периоду
+    Row(Modifier.fillMaxWidth().padding(start = 28.dp, top = 4.dp)) {
+        val n = if (maxX == minX) 1 else 4
+        (0 until n).forEach { i ->
+            val d = if (n == 1) minX else minX + (maxX - minX) * i / (n - 1)
+            Text(
+                day(d),
+                style = MaterialTheme.typography.labelSmall,
+                color = labelColor,
+                modifier = Modifier.weight(1f),
+                textAlign = when (i) {
+                    0 -> androidx.compose.ui.text.style.TextAlign.Start
+                    n - 1 -> androidx.compose.ui.text.style.TextAlign.End
+                    else -> androidx.compose.ui.text.style.TextAlign.Center
+                },
+            )
+        }
     }
-    picked?.let {
-        Text(
-            "${day(it.epochDay)}: ${it.value}$unit${if (it.manual) " ✎" else ""}",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(top = 6.dp),
-        )
-    }
+    Text(
+        "${day(pick.epochDay)}: ${pick.value}$unit${if (pick.manual) " · вручную" else ""}",
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = if (pick.manual) ManualGreen else Color.Unspecified,
+        modifier = Modifier.padding(top = 6.dp),
+    )
 }
 
 // ---------------- Бег ----------------

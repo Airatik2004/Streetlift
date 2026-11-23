@@ -61,18 +61,27 @@ object Records {
             .sortedByDescending { it.weight }
     }
 
-    /**
-     * Точки графика при одном весе: по тренировке — лучший подход ([sum] = false)
-     * или сумма повторов ([sum] = true). Ручные рекорды — отдельные точки (только для лучшего подхода).
-     */
-    fun series(entries: List<Entry>, name: String, stage: String?, weight: Float, sum: Boolean): List<Point> {
+    /** Точки графика при одном весе: лучший подход каждой тренировки и ручные рекорды, в периоде [from]..[to]. */
+    fun series(entries: List<Entry>, name: String, stage: String?, weight: Float, from: Long? = null, to: Long? = null): List<Point> =
+        history(entries, name, stage, weight, from, to).map { Point(it.epochDay, it.best, it.manualId != null) }.sortedBy { it.epochDay }
+
+    /** Строка истории при весе: тренировка (подходы по порядку) или ручной рекорд. */
+    data class HistoryRow(val epochDay: Long, val values: List<Int>, val sessionId: Long?, val manualId: Long?) {
+        val best: Int get() = values.max()
+    }
+
+    /** История упражнения при весе за период — новые сверху. */
+    fun history(entries: List<Entry>, name: String, stage: String?, weight: Float, from: Long? = null, to: Long? = null): List<HistoryRow> {
         val k = key(weight)
-        val list = entries.filter { it.name == name && it.stage == stage && it.weightKey == k }
-        val fromSessions = list.filter { it.sessionId != null }.groupBy { it.sessionId }.map { (_, s) ->
-            Point(s.minOf { it.epochDay }, if (sum) s.sumOf { it.value } else s.maxOf { it.value }, manual = false)
+        val list = entries.filter {
+            it.name == name && it.stage == stage && it.weightKey == k &&
+                (from == null || it.epochDay >= from) && (to == null || it.epochDay <= to)
         }
-        val manual = if (sum) emptyList() else list.filter { it.manualId != null }.map { Point(it.epochDay, it.value, manual = true) }
-        return (fromSessions + manual).sortedBy { it.epochDay }
+        val sessions = list.filter { it.sessionId != null }.groupBy { it.sessionId }.map { (sid, s) ->
+            HistoryRow(s.minOf { it.epochDay }, s.map { it.value }, sid, null)
+        }
+        val manual = list.filter { it.manualId != null }.map { HistoryRow(it.epochDay, listOf(it.value), null, it.manualId) }
+        return (sessions + manual).sortedWith(compareByDescending<HistoryRow> { it.epochDay }.thenByDescending { it.sessionId ?: 0 })
     }
 
     /**

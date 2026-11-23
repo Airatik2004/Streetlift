@@ -14,9 +14,9 @@ import ru.streetlift.tracker.domain.PriorityMode
 import ru.streetlift.tracker.domain.PlanState
 
 /** Глобальное состояние программы (одна строка, id = 1). */
-@Serializable
 const val DEFAULT_BANDS = "Зелёная:75,Фиолетовая:45,Чёрная:30,Красная:20"
 
+@Serializable
 @Entity(tableName = "settings")
 data class SettingsEntity(
     @PrimaryKey val id: Int = 1,

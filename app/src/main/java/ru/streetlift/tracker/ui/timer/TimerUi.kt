@@ -331,28 +331,8 @@ fun TimerScreen() {
                 }
             }
         }
-        // Общий блок звука стоит на месте; свайп по нему переключает режим таймера
-        Box(
-            Modifier.pointerInput(Unit) {
-                var total = 0f
-                detectHorizontalDragGestures(
-                    onDragStart = { total = 0f },
-                    onDragEnd = {
-                        val target = when {
-                            total < -80f -> pager.currentPage + 1
-                            total > 80f -> pager.currentPage - 1
-                            else -> pager.currentPage
-                        }.coerceIn(0, 2)
-                        scope.launch { pager.animateScrollToPage(target) }
-                    },
-                ) { change, drag ->
-                    change.consume()
-                    total += drag
-                }
-            },
-        ) {
-            SignalSettingsCard(prefs, update)
-        }
+        // Общий блок звука стоит на месте; свайп по нему листает нижние вкладки (Цикл ↔ Таймер ↔ История)
+        SignalSettingsCard(prefs, update)
     }
 }
 

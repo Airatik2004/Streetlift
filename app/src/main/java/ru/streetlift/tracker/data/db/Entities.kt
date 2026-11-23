@@ -166,7 +166,7 @@ data class ExerciseEntity(
     )
 
     /** Одностороннее: подход — сначала одна сторона, потом другая (пистолетики, подтягивания на 1 руке). */
-    val unilateral: Boolean get() = name == "Пистолетики" || name == "Подтягивания на 1 руке"
+    val unilateral: Boolean get() = name == "Пистолетики" || name == "Подтягивания на 1 руке" || shareKey == "rear_delt"
 
     /** Тренировок в цикле упражнения: задняя дельта — 2 (дни 1 и 3), остальные — 1. */
     val sessionsPerCycle: Int get() = if (shareKey != null) 2 else 1

@@ -199,6 +199,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                     isCurrent = ui.current?.exercise?.id == b.exercise.id,
                     onFocus = { vm.focus(b.exercise.id) },
                     onExtra = { vm.addExtraSet(b.exercise.id) },
+                    onRemoveSet = { vm.removeSet(b.exercise.id) },
                     onDeleteLog = { logToDelete = it },
                 )
             }
@@ -373,7 +374,8 @@ private fun CurrentSetCard(
                 )
             }
 
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            // Степперы друг под другом — в одну строку на телефоне не помещаются
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Stepper(
                     label = "Вес (шаг ${Fmt.step(step)})",
                     value = Fmt.weight(weight).removeSuffix(" кг"),
@@ -434,6 +436,7 @@ private fun ExerciseBlockCard(
     isCurrent: Boolean,
     onFocus: () -> Unit,
     onExtra: () -> Unit,
+    onRemoveSet: () -> Unit,
     onDeleteLog: (SetLogEntity) -> Unit,
 ) {
     val plan = block.plan
@@ -474,6 +477,7 @@ private fun ExerciseBlockCard(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (!isCurrent) TextButton(onClick = onFocus) { Text("Сделать сейчас") }
+                TextButton(onClick = onRemoveSet, enabled = block.plannedCount > maxOf(block.doneCount, 1)) { Text("− подход") }
                 TextButton(onClick = onExtra) { Text("+ подход") }
             }
         }

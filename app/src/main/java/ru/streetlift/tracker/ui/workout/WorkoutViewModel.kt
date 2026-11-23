@@ -110,7 +110,7 @@ class WorkoutViewModel(
                 exercise = ex,
                 plan = plan,
                 logs = logs.filter { it.exerciseId == ex.id }.sortedBy { it.setIndex },
-                plannedCount = plan.sets + (loc.extra[ex.id] ?: 0),
+                plannedCount = (plan.sets + (loc.extra[ex.id] ?: 0)).coerceAtLeast(1),
                 skipped = loc.skipped[ex.id] ?: 0,
             )
         }
@@ -207,6 +207,13 @@ class WorkoutViewModel(
 
     fun addExtraSet(exerciseId: Long) {
         local.update { it.copy(extra = it.extra + (exerciseId to ((it.extra[exerciseId] ?: 0) + 1)), focusId = exerciseId) }
+    }
+
+    /** Убрать один запланированный подход (не меньше уже сделанных и не меньше 1). */
+    fun removeSet(exerciseId: Long) {
+        val b = ui.value.blocks.firstOrNull { it.exercise.id == exerciseId } ?: return
+        if (b.plannedCount <= maxOf(b.doneCount, 1)) return
+        local.update { it.copy(extra = it.extra + (exerciseId to ((it.extra[exerciseId] ?: 0) - 1))) }
     }
 
     fun focus(exerciseId: Long) = local.update { it.copy(focusId = exerciseId) }

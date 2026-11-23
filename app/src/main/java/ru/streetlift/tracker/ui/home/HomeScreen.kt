@@ -188,41 +188,20 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
         item {
             Column {
                 Text("Дневник тренировок", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text(
-                    "Круг ${s.completedRounds + 1} · день ${ui.nextDayIndex + 1} из ${ui.days.size}",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        // --- Статус мезоцикла и разгрузки ---
-        item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (ui.globalDeload) {
-                        Tag("Разгрузочный круг", DeloadGreen)
-                        Text(
-                            "Вес 100%, подходы −50% (минимум 2), RIR 3–4, отдых короче на 30 с.",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    } else {
-                        Text(
-                            "Мезоцикл: круг ${s.cycleInMeso.coerceAtMost(s.deloadEvery)} из ${s.deloadEvery}",
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        val left = (s.deloadEvery - s.cycleInMeso).coerceAtLeast(0)
-                        Text(
-                            if (left == 0) "Плановая разгрузка отменена на этот круг"
-                            else "До плановой разгрузки: $left ${plural(left, "круг", "круга", "кругов")}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    OutlinedButton(onClick = { vm.setDeload(!ui.globalDeload) }) {
-                        Text(if (ui.globalDeload) "Отменить разгрузку" else "Включить разгрузку на этот круг")
-                    }
+                // Мезоцикл одной строкой; разгрузку выбирают во вкладке «Цикл»
+                val left = (s.deloadEvery - s.cycleInMeso).coerceAtLeast(0)
+                val deloadText = when {
+                    ui.phase != PeakPhase.NONE -> "подводка к старту"
+                    ui.globalDeload -> "разгрузка"
+                    left == 0 -> "плановая разгрузка отменена"
+                    else -> "разгрузка через $left ${plural(left, "круг", "круга", "кругов")}"
                 }
+                Text(
+                    "Круг ${s.cycleInMeso.coerceAtMost(s.deloadEvery)} из ${s.deloadEvery} · " +
+                        "день ${ui.nextDayIndex + 1} из ${ui.days.size} · $deloadText",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (ui.globalDeload) DeloadGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 

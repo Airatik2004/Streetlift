@@ -68,6 +68,7 @@ class EditorViewModel(private val repo: WorkoutRepository) : ViewModel() {
     fun saveExercise(e: ExerciseEntity) = viewModelScope.launch { repo.saveExercise(e) }
     fun setAlternating(day: DayEntity, on: Boolean) = viewModelScope.launch { repo.updateDay(day.copy(alternating = on)) }
     fun setDeloadEvery(n: Int) = viewModelScope.launch { repo.setDeloadEvery(n) }
+    fun setDeload(want: Boolean) = viewModelScope.launch { repo.setDeload(want) }
     fun setAutoStart(b: Boolean) = viewModelScope.launch { repo.setAutoStartTimer(b) }
     fun resetProgram() = viewModelScope.launch { repo.resetProgram() }
     fun reopenSetup() = viewModelScope.launch { repo.reopenSetup() }
@@ -152,7 +153,7 @@ fun EditorScreen(repo: WorkoutRepository) {
                             if (e.mode != ExerciseMode.CALIBRATION) {
                                 Text(
                                     "Сейчас: ${Fmt.weight(e.weightKg)}, ${e.plannedSets} подх., цель ${e.targetReps}+" +
-                                        if (e.emergencyDeloadNext) " · аварийная разгрузка" else "",
+                                        if (e.emergencyDeloadNext) " · разгрузка на следующей" else "",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.primary,
                                 )
@@ -181,6 +182,19 @@ fun EditorScreen(repo: WorkoutRepository) {
                             onMinus = { vm.setDeloadEvery(s.deloadEvery - 1) },
                             onPlus = { vm.setDeloadEvery(s.deloadEvery + 1) },
                         )
+                    }
+                    HorizontalDivider()
+                    val globalDeload = ru.streetlift.tracker.domain.ProgressionEngine.isGlobalDeload(s.cycleInMeso, s.deloadEvery, s.deloadOverride)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Разгрузка на этот круг", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "все упражнения: вес 100%, подходы −50% (мин. 2), RIR 3–4",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = globalDeload, onCheckedChange = { vm.setDeload(it) })
                     }
                     HorizontalDivider()
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -236,6 +250,7 @@ private fun CalibrationDialog(
 ) {
     var stage by remember { mutableStateOf(exercise.leverageStage) }
     var calibrate by remember { mutableStateOf(exercise.mode == ExerciseMode.CALIBRATION) }
+    var deload by remember { mutableStateOf(exercise.emergencyDeloadNext) }
     var weight by remember { mutableStateOf(Fmt.weight(exercise.weightKg).removeSuffix(" кг")) }
     var error by remember { mutableStateOf<String?>(null) }
     val stageChanged = stage != exercise.leverageStage
@@ -278,6 +293,17 @@ private fun CalibrationDialog(
                     Text("Калибровка на следующей тренировке", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                     Switch(checked = calibrate || stageChanged, onCheckedChange = { calibrate = it })
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Разгрузка на следующей тренировке", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "только это упражнение: подходы −50%, RIR 3–4",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = deload, onCheckedChange = { deload = it })
+                }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
         },
@@ -292,6 +318,7 @@ private fun CalibrationDialog(
                             weightKg = w,
                             leverageStage = stage,
                             mode = if (calibrate || stageChanged) ExerciseMode.CALIBRATION else ExerciseMode.ACTIVE,
+                            emergencyDeloadNext = deload,
                         ),
                     )
                 }

@@ -14,25 +14,39 @@ enum class ExerciseType(val title: String) {
 enum class Metric { REPS, SECONDS }
 
 /** Приоритет дней 2–4: что идёт первым. */
-enum class Priority(val title: String) { PRESS("Жим"), PULL("Тяга") }
+enum class Priority(val title: String) {
+    PRESS("Жим"), PULL("Тяга");
 
-/** Режим приоритета: вручную или «Авто» — чередование по мезоциклам (начинаем с жима). */
-enum class PriorityMode(val title: String) {
-    PRESS("Жим"), PULL("Тяга"), AUTO("Авто");
-
-    fun effective(mesoIndex: Int): Priority = when (this) {
-        PRESS -> Priority.PRESS
-        PULL -> Priority.PULL
-        AUTO -> if (mesoIndex % 2 == 0) Priority.PRESS else Priority.PULL
+    companion object {
+        /** Чередование по мезоциклам: чётный — жим, нечётный — тяга (начинаем с жима). */
+        fun forMeso(mesoIndex: Int): Priority = if (mesoIndex.mod(2) == 0) PRESS else PULL
     }
 }
 
-/** Порядок упражнений дня с учётом приоритета: в днях 2–4 при «Тяге» первые два меняются местами. */
+/**
+ * Устаревший выбор приоритета (Жим / Тяга / Авто). Больше не используется — приоритет всегда
+ * чередуется по мезоциклам; enum оставлен только ради колонки settings.priorityMode.
+ */
+enum class PriorityMode(val title: String) {
+    PRESS("Жим"), PULL("Тяга"), AUTO("Авто");
+}
+
 object ProgramOrder {
+    /** Порядок дня по приоритету мезоцикла: в днях 2–4 при «Тяге» первые два меняются местами. */
     fun <T> order(dayPosition: Int, items: List<T>, priority: Priority): List<T> =
         if (priority == Priority.PULL && dayPosition in 1..3 && items.size >= 2) {
             listOf(items[1], items[0]) + items.drop(2)
         } else items
+
+    /**
+     * Порядок дня с подводкой к пику: сначала выбранные для пика упражнения, потом остальные.
+     * Внутри обеих групп — обычный порядок с учётом приоритета мезоцикла.
+     * Невыбранные «всегда в конце» (задняя дельта) так и остаются в конце.
+     */
+    fun <T> order(dayPosition: Int, items: List<T>, priority: Priority, isPeak: (T) -> Boolean): List<T> {
+        val (peak, rest) = order(dayPosition, items, priority).partition(isPeak)
+        return peak + rest
+    }
 }
 
 /** Ручное управление плановой разгрузкой на текущий круг. */

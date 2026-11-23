@@ -44,7 +44,7 @@ object DefaultTemplate {
                 Ex("Пистолетики", ACCESSORY, 3..4, 8..12, 2..2, 1.25f),
                 // Через цикл с пистолетиками; растёт высота (Jumps)
                 Ex("Прыжки на тумбу", EXPLOSIVE, 4..4, 3..5, 2..2, 2.5f),
-                Ex("Обратные разведения на заднюю дельту", ISOLATION, 3..3, 15..20, 2..2, 1.25f, alwaysLast = true, shareKey = "rear_delt"),
+                Ex("Разведения на дельту", ISOLATION, 3..3, 15..20, 2..2, 1.25f, alwaysLast = true, shareKey = "rear_delt"),
             ),
         ),
         Day(
@@ -60,7 +60,7 @@ object DefaultTemplate {
             listOf(
                 Ex("Отжимания на брусьях", HYPERTROPHY_PUMP, 4..4, 15..20, 2..2, 1.25f),
                 Ex("Подтягивания", HYPERTROPHY_PUMP, 4..4, 15..20, 2..2, 1.25f),
-                Ex("Обратные разведения на заднюю дельту", ISOLATION, 3..3, 15..20, 2..2, 1.25f, alwaysLast = true, shareKey = "rear_delt"),
+                Ex("Разведения на дельту", ISOLATION, 3..3, 15..20, 2..2, 1.25f, alwaysLast = true, shareKey = "rear_delt"),
             ),
         ),
         Day(
@@ -74,7 +74,10 @@ object DefaultTemplate {
     )
 
     /** Старые названия → новые (для импорта старых бэкапов). */
-    val renamed = mapOf("Подтягивания глубоким хватом" to "Подтягивания")
+    val renamed = mapOf(
+        "Подтягивания глубоким хватом" to "Подтягивания",
+        "Обратные разведения на заднюю дельту" to "Разведения на дельту",
+    )
 
     fun builtInStages(): List<StageEntity> = StageGroups.lists.flatMap { (group, list) ->
         list.mapIndexed { i, st ->

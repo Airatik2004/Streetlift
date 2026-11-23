@@ -122,7 +122,7 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
         val peakIds = s.peakIds
         val previews = if (day == null) emptyList() else ru.streetlift.tracker.domain.ProgramOrder.order(
             day.position, exs.filter { it.dayId == day.id && it.activeInRound(s.completedRounds + 1) }.sortedBy { it.position }, s.priority,
-        )
+        ) { phase != PeakPhase.NONE && it.id in peakIds }
             .map { ExercisePreview(it, Peaking.resolve(it.toConfig(), it.toState(), it.type, phase == PeakPhase.NONE && it.plannedDeload(s.deloadEvery, global), phase, it.id in peakIds, s.bodyWeightKg)
                 ?.let { p -> if (afterPause) p.copy(sets = (p.sets - 1).coerceAtLeast(1)) else p }
                 ?.let { p -> if (it.isJump) ru.streetlift.tracker.domain.jumpPlan(it.jumpState, p) else p }) }
@@ -160,7 +160,6 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
     fun setDeload(want: Boolean) = viewModelScope.launch { repo.setDeload(want) }
     fun setPeak(epochDay: Long, ids: Set<Long>, bw: Float?) = viewModelScope.launch { repo.setPeak(epochDay, ids, bw) }
     fun clearPeak() = viewModelScope.launch { repo.clearPeak() }
-    fun setPriority(m: ru.streetlift.tracker.domain.PriorityMode) = viewModelScope.launch { repo.setPriorityMode(m) }
 
     init {
         viewModelScope.launch { repo.checkPeakExpired() }

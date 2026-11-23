@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ManualRecordEntity::class,
         RunEntity::class,
     ],
-    version = 17,
+    version = 18,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -29,6 +29,18 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun statsDao(): StatsDao
 
     companion object {
+        /** v18: «Обратные разведения на заднюю дельту» → «Разведения на дельту» (программа, история, рекорды). */
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                val old = "Обратные разведения на заднюю дельту"
+                val new = "Разведения на дельту"
+                db.execSQL("UPDATE exercises SET name = ? WHERE name = ?", arrayOf(new, old))
+                db.execSQL("UPDATE set_logs SET exerciseName = ? WHERE exerciseName = ?", arrayOf(new, old))
+                db.execSQL("UPDATE stage_archive SET exerciseName = ? WHERE exerciseName = ?", arrayOf(new, old))
+                db.execSQL("UPDATE manual_records SET exerciseName = ? WHERE exerciseName = ?", arrayOf(new, old))
+            }
+        }
+
         /** v17: прыжки на тумбу — высота. */
         val MIGRATION_16_17 = object : Migration(16, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -154,7 +166,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "streetlift.db")
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18)
                 // Самая первая сборка (v1) не сохраняется — пересоздаётся
                 .fallbackToDestructiveMigration()
                 .build()

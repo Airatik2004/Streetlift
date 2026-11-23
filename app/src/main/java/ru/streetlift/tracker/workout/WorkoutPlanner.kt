@@ -112,11 +112,15 @@ object WorkoutPlanner {
                 firstSide = first,
             )
         }
+        // Подводка: упражнения пика — первыми, все их подходы подряд (вне суперсета)
+        val peakIds = session.peakIds?.split(',')?.mapNotNull { it.trim().toLongOrNull() }?.toSet().orEmpty()
+        val peakFirst = blocks.filter { it.exercise.id in peakIds }
+        val others = blocks.filter { it.exercise.id !in peakIds }
         // Статика и задняя дельта — всегда в конце дня, вне суперсета
-        val main = blocks.filter { !it.exercise.outOfSuperset }
-        val tail = blocks.filter { it.exercise.outOfSuperset }
+        val main = others.filter { !it.exercise.outOfSuperset }
+        val tail = others.filter { it.exercise.outOfSuperset }
         val alternating = session.alternating && main.size > 1
-        val order = buildOrder(main, alternating) + buildOrder(tail, false)
+        val order = buildOrder(peakFirst, false) + buildOrder(main, alternating) + buildOrder(tail, false)
         val byId = blocks.associateBy { it.exercise.id }
         val nextPending = order.firstOrNull { (id, n) -> n > (byId[id]?.doneCount ?: 0) }
         val current = nextPending?.let { byId[it.first] }

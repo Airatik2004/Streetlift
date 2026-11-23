@@ -77,7 +77,6 @@ class EditorViewModel(private val repo: WorkoutRepository) : ViewModel() {
     fun setBands(b: List<ru.streetlift.tracker.domain.Band>) = viewModelScope.launch { repo.setBands(b) }
     fun setReminders(s: SettingsEntity) =
         viewModelScope.launch { repo.setReminders(s.remindEve, s.remindEveMin, s.remindDay, s.remindDayMin, s.remindLate, s.remindLateMin) }
-    fun setPriority(m: ru.streetlift.tracker.domain.PriorityMode) = viewModelScope.launch { repo.setPriorityMode(m) }
     fun setAutoStart(b: Boolean) = viewModelScope.launch { repo.setAutoStartTimer(b) }
     fun resetProgram() = viewModelScope.launch { repo.resetProgram() }
     fun reopenSetup() = viewModelScope.launch { repo.reopenSetup() }
@@ -113,71 +112,65 @@ fun EditorScreen(repo: WorkoutRepository) {
             }
         }
 
-        items(ui.days, key = { it.id }) { day ->
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("День ${day.position + 1} из 4", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                            Text(day.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                    if (ui.exercises[day.id].orEmpty().size > 1) {
+        // Два цикла подряд: текущий и следующий. В Дне 1 — то, что там реально будет
+        // (пистолетики в нечётных циклах, прыжки — в чётных); порядок — по приоритету мезоцикла,
+        // на подводке первыми идут упражнения пика.
+        val round1 = s.completedRounds + 1
+        val nextMeso = if (s.cycleInMeso >= s.deloadEvery || s.forcedDeload) s.mesoIndex + 1 else s.mesoIndex
+        val workoutDay = maxOf(java.time.LocalDate.now().toEpochDay(), s.nextWorkoutEpochDay ?: 0L)
+        val peakOn = ru.streetlift.tracker.domain.Peaking.phaseOn(s.peakEpochDay, workoutDay, s.peakSpanDays) !=
+            ru.streetlift.tracker.domain.PeakPhase.NONE
+        val peakIds = if (peakOn) s.peakIds else emptySet()
+        listOf(0, 1).forEach { block ->
+            val round = round1 + block
+            val priority = ru.streetlift.tracker.domain.Priority.forMeso(if (block == 0) s.mesoIndex else nextMeso)
+            item(key = "head_$block") {
+                Column(Modifier.padding(top = if (block == 0) 0.dp else 8.dp)) {
+                    Text(
+                        if (block == 0) "Цикл $round — текущий" else "Цикл $round — следующий",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        if (peakOn) "Подводка к пику: упражнения пика — первыми; приоритет: ${priority.title.lowercase()}"
+                        else "Приоритет: ${priority.title.lowercase()} (меняется с каждым мезоциклом)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            items(ui.days, key = { "d${block}_${it.id}" }) { day ->
+                val dayExercises = ui.exercises[day.id].orEmpty()
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text("Суперсет", style = MaterialTheme.typography.bodyMedium)
-                                Text(
-                                    if (day.alternating) "сейчас: А1 → Б1 → А2 → Б2…" else "сейчас: все подходы А, потом все подходы Б",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                                Text("День ${day.position + 1} из 4", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                Text(day.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                             }
-                            Switch(checked = day.alternating, onCheckedChange = { vm.setAlternating(day, it) })
+                            if (block == 0 && day.position == s.currentDayIndex) Tag("Ближайший", MaterialTheme.colorScheme.primary)
                         }
-                    }
-                    HorizontalDivider()
-                    ru.streetlift.tracker.domain.ProgramOrder.order(day.position, ui.exercises[day.id].orEmpty(), s.priority).forEach { e ->
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable { editExercise = e }
-                                .padding(vertical = 6.dp),
-                        ) {
+                        // Суперсет — только в текущем цикле, чтобы не дублировать
+                        if (block == 0 && dayExercises.size > 1) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(e.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                                if (e.mode == ExerciseMode.CALIBRATION) Tag("Калибровка", MaterialTheme.colorScheme.secondary)
-                            }
-                            Text(
-                                "${Fmt.range(e.minSets, e.maxSets)} × ${Fmt.range(e.minReps, e.maxReps)}${if (e.isSeconds) " с" else ""} · " +
-                                    "${Fmt.rir(e.targetRirMin, e.targetRirMax)} · шаг ${Fmt.step(e.weightStep)} кг",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            e.leverageStage?.let { Text("Стадия: $it", style = MaterialTheme.typography.bodySmall) }
-                            if (e.stageCeiling) {
-                                Tag("Потолок стадии достигнут — можно переходить на следующую стадию", ru.streetlift.tracker.ui.theme.WarnOrange)
-                            }
-                            if (e.mode != ExerciseMode.CALIBRATION) {
-                                when {
-                                    s.forcedDeload || e.plannedDeload(s.deloadEvery, false) ->
-                                        Tag("Разгрузка", ru.streetlift.tracker.ui.theme.DeloadGreen)
-                                    e.deloadDue(s.deloadEvery) && e.skipPlannedDeload == true ->
-                                        Tag("Без разгрузки", ru.streetlift.tracker.ui.theme.DeloadGreen)
-                                    else -> deloadInText(e, s.deloadEvery)?.let {
-                                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
+                                Column(Modifier.weight(1f)) {
+                                    Text("Суперсет", style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        if (day.alternating) "сейчас: А1 → Б1 → А2 → Б2…" else "сейчас: все подходы А, потом все подходы Б",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
                                 }
+                                Switch(checked = day.alternating, onCheckedChange = { vm.setAlternating(day, it) })
                             }
-                            if (e.mode != ExerciseMode.CALIBRATION) {
-                                Text(
-                                    (if (e.isJump) "Сейчас: ${e.jumpState?.let { ru.streetlift.tracker.domain.Jumps.describe(it) } ?: "высота не задана"}"
-                                    else "Сейчас: ${Fmt.weight(e.weightKg)}, ${e.plannedSets} подх., цель ${e.targetReps}+${if (e.isSeconds) " с" else ""}") +
-                                        (if (e.altSlot != null) " · через цикл" else "") +
-                                        if (e.emergencyDeloadNext) " · разгрузка на следующей" else "",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                            }
+                        }
+                        HorizontalDivider()
+                        ru.streetlift.tracker.domain.ProgramOrder.order(
+                            day.position, dayExercises.filter { it.activeInRound(round) }, priority,
+                        ) { it.id in peakIds }.forEach { e ->
+                            // Во втором цикле упражнение, которое было и в первом, показываем «на цикл вперёд»
+                            val ahead = block == 1 && e.activeInRound(round1)
+                            ExerciseRow(e, s, block, ahead) { editExercise = e }
                         }
                     }
                 }
@@ -203,8 +196,6 @@ fun EditorScreen(repo: WorkoutRepository) {
                         }
                         Icon(Icons.Filled.Edit, contentDescription = "Изменить")
                     }
-                    HorizontalDivider()
-                    ru.streetlift.tracker.ui.common.PrioritySwitch(s.priorityMode, s.priority) { vm.setPriority(it) }
                     HorizontalDivider()
                     val globalDeload = s.forcedDeload
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -486,6 +477,65 @@ private fun ReminderSettings(s: SettingsEntity, onChange: (SettingsEntity) -> Un
             TextButton(onClick = {
                 ru.streetlift.tracker.reminder.Reminders.exactSettingsIntent(ctx)?.let { runCatching { ctx.startActivity(it) } }
             }) { Text("Разрешить точное время") }
+        }
+    }
+}
+
+/**
+ * Строка упражнения в «Цикле». [block] — 0 текущий цикл, 1 следующий.
+ * [ahead] — во втором цикле для упражнения, которое есть и в первом: значения текущие,
+ * разгрузка показывается, только если она придётся именно на следующий цикл.
+ */
+@Composable
+private fun ExerciseRow(e: ExerciseEntity, s: SettingsEntity, block: Int, ahead: Boolean, onClick: () -> Unit) {
+    // «Разгрузка на этот цикл» действует только на текущий цикл
+    val forced = s.forcedDeload && block == 0
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(e.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+            if (e.mode == ExerciseMode.CALIBRATION && !ahead) Tag("Калибровка", MaterialTheme.colorScheme.secondary)
+        }
+        Text(
+            "${Fmt.range(e.minSets, e.maxSets)} × ${Fmt.range(e.minReps, e.maxReps)}${if (e.isSeconds) " с" else ""} · " +
+                "${Fmt.rir(e.targetRirMin, e.targetRirMax)} · шаг ${Fmt.step(e.weightStep)} кг",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        e.leverageStage?.let { Text("Стадия: $it", style = MaterialTheme.typography.bodySmall) }
+        if (e.stageCeiling) {
+            Tag("Потолок стадии достигнут — можно переходить на следующую стадию", ru.streetlift.tracker.ui.theme.WarnOrange)
+        }
+        if (ahead) {
+            // Разгрузка на цикл вперёд: сейчас её нет, а следующий цикл упражнения — N-й
+            val nowDeload = s.forcedDeload || e.plannedDeload(s.deloadEvery, false)
+            if (e.mode == ExerciseMode.ACTIVE && !nowDeload && e.cycleNo == s.deloadEvery - 1) {
+                Tag("Разгрузка", ru.streetlift.tracker.ui.theme.DeloadGreen)
+            }
+        } else if (e.mode != ExerciseMode.CALIBRATION) {
+            when {
+                forced || e.plannedDeload(s.deloadEvery, false) ->
+                    Tag("Разгрузка", ru.streetlift.tracker.ui.theme.DeloadGreen)
+                e.deloadDue(s.deloadEvery) && e.skipPlannedDeload == true ->
+                    Tag("Без разгрузки", ru.streetlift.tracker.ui.theme.DeloadGreen)
+                else -> deloadInText(e, s.deloadEvery)?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        if (e.mode != ExerciseMode.CALIBRATION) {
+            Text(
+                (if (e.isJump) "Сейчас: ${e.jumpState?.let { ru.streetlift.tracker.domain.Jumps.describe(it) } ?: "высота не задана"}"
+                else "Сейчас: ${Fmt.weight(e.weightKg)}, ${e.plannedSets} подх., цель ${e.targetReps}+${if (e.isSeconds) " с" else ""}") +
+                    (if (e.altSlot != null) " · через цикл" else "") +
+                    if (e.emergencyDeloadNext && !ahead) " · разгрузка на следующей" else "",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
         }
     }
 }

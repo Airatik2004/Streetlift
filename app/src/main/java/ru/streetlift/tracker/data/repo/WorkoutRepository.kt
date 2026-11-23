@@ -19,7 +19,6 @@ import ru.streetlift.tracker.domain.Fmt
 import ru.streetlift.tracker.domain.DeloadOverride
 import ru.streetlift.tracker.domain.ExerciseMode
 import ru.streetlift.tracker.domain.PeakPhase
-import ru.streetlift.tracker.domain.PriorityMode
 import ru.streetlift.tracker.domain.Peaking
 import ru.streetlift.tracker.domain.StageGroups
 import ru.streetlift.tracker.domain.ExerciseType
@@ -470,10 +469,6 @@ class WorkoutRepository(private val db: AppDatabase) {
         settingsDao.upsert(s.copy(deloadOverride = if (want) DeloadOverride.FORCE_ON else DeloadOverride.AUTO))
     }
 
-    suspend fun setPriorityMode(mode: PriorityMode) {
-        settingsDao.upsert(getSettings().copy(priorityMode = mode))
-    }
-
     suspend fun setAutoStartTimer(enabled: Boolean) {
         val s = getSettings()
         settingsDao.upsert(s.copy(autoStartTimer = enabled))
@@ -691,6 +686,7 @@ class WorkoutRepository(private val db: AppDatabase) {
                     setupDone = true,
                     // Плановая разгрузка всегда на 5-м цикле, даже если в файле другое число
                     deloadEvery = SettingsEntity.DELOAD_EVERY,
+                    priorityMode = ru.streetlift.tracker.domain.PriorityMode.AUTO,
                     currentDayIndex = data.settings.currentDayIndex.coerceIn(0, days.size - 1),
                 ),
             )

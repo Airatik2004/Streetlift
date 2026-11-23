@@ -75,7 +75,8 @@ data class SettingsEntity(
     /** Общая «Разгрузка на этот цикл» — разгружает все упражнения сразу. */
     val forcedDeload: Boolean get() = deloadOverride == DeloadOverride.FORCE_ON
 
-    val priority: ru.streetlift.tracker.domain.Priority get() = priorityMode.effective(mesoIndex)
+    /** Приоритет дня — чередование по мезоциклам (на подводке первыми идут упражнения пика). */
+    val priority: ru.streetlift.tracker.domain.Priority get() = ru.streetlift.tracker.domain.Priority.forMeso(mesoIndex)
 
     val peakIds: Set<Long> get() = peakExerciseIds.split(',').mapNotNull { it.trim().toLongOrNull() }.toSet()
 

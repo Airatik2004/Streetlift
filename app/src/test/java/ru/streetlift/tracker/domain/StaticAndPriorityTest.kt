@@ -43,11 +43,23 @@ class StaticAndPriorityTest {
     }
 
     @Test
-    fun priorityAuto_alternatesByMesocycle() {
-        assertEquals(Priority.PRESS, PriorityMode.AUTO.effective(0))
-        assertEquals(Priority.PULL, PriorityMode.AUTO.effective(1))
-        assertEquals(Priority.PRESS, PriorityMode.AUTO.effective(2))
-        assertEquals(Priority.PULL, PriorityMode.PULL.effective(0))
+    fun priority_alternatesByMesocycle() {
+        assertEquals(Priority.PRESS, Priority.forMeso(0))
+        assertEquals(Priority.PULL, Priority.forMeso(1))
+        assertEquals(Priority.PRESS, Priority.forMeso(2))
+    }
+
+    @Test
+    fun peak_selectedFirst_thenRest_withMesoPriority() {
+        val day = listOf("Горизонт", "П1Р", "Удержание")
+        // Подводка к удержанию при «Жиме»: удержание первым, остальные по обычному порядку
+        assertEquals(listOf("Удержание", "Горизонт", "П1Р"), ProgramOrder.order(1, day, Priority.PRESS) { it == "Удержание" })
+        // Выбраны двое при «Тяге»: внутри выбранных — порядок мезоцикла
+        assertEquals(listOf("П1Р", "Горизонт", "Удержание"), ProgramOrder.order(1, day, Priority.PULL) { it != "Удержание" })
+        // Дельта в конце, пока не выбрана; выбранная — первая
+        val d1 = listOf("Выходы", "Пистолетики", "Дельта")
+        assertEquals(d1, ProgramOrder.order(0, d1, Priority.PULL) { false })
+        assertEquals(listOf("Дельта", "Выходы", "Пистолетики"), ProgramOrder.order(0, d1, Priority.PRESS) { it == "Дельта" })
     }
 
     @Test

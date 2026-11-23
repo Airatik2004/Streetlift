@@ -79,7 +79,9 @@ object ActiveWorkout {
             // Порядок дня по приоритету тренировки (Жим/Тяга): в днях 2–4 первые два меняются местами
             val dayPos = session.dayId?.let { repo.getDay(it)?.position } ?: 0
             val priority = session.priority?.let { runCatching { Priority.valueOf(it) }.getOrNull() } ?: Priority.PRESS
-            val all = ProgramOrder.order(dayPos, session.dayId?.let { repo.getExercisesForDay(it) } ?: emptyList(), priority)
+            // На подводке первыми идут упражнения пика, внутри групп — порядок мезоцикла
+            val sessionPeakIds = session.peakIds?.split(',')?.mapNotNull { it.trim().toLongOrNull() }?.toSet().orEmpty()
+            val all = ProgramOrder.order(dayPos, session.dayId?.let { repo.getExercisesForDay(it) } ?: emptyList(), priority) { it.id in sessionPeakIds }
                 // Через цикл: пистолетики / прыжки на тумбу
                 .filter { it.activeInRound(session.roundNumber) }
             // Подводка: у пиковых/фоновых свой план, часть упражнений пропускается

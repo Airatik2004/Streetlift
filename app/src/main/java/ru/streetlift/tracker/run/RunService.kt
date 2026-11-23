@@ -41,8 +41,8 @@ class RunService : Service() {
     private var listening = false
 
     private val listener = LocationListener { loc: Location ->
-        // Грубые точки (хуже 30 м) не пишем — маршрут не скачет
-        if (!loc.hasAccuracy() || loc.accuracy <= 30f) RunTracker.addPoint(loc.latitude, loc.longitude)
+        // Позиция видна всегда; в маршрут идут только точки лучше 30 м (решает RunTracker)
+        RunTracker.onLocation(loc.latitude, loc.longitude, if (loc.hasAccuracy()) loc.accuracy else null)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -72,8 +72,12 @@ class RunService : Service() {
         if (ticker == null) {
             ticker = scope.launch {
                 while (isActive && RunTracker.state.value.active) {
+                    val s = RunTracker.state.value
+                    if (s.phase == RunTracker.Phase.COUNTDOWN) ru.streetlift.tracker.timer.Beeper.pip()
                     getSystemService(NotificationManager::class.java).notify(NOTIF_ID, build())
                     delay(1000)
+                    // Отсчёт закончился — свисток, бег пошёл
+                    if (RunTracker.tickCountdown()) ru.streetlift.tracker.timer.Beeper.whistle()
                 }
             }
         }
@@ -84,9 +88,20 @@ class RunService : Service() {
     private fun startLocation() {
         if (listening) return
         val lm = getSystemService(LocationManager::class.java)
-        runCatching {
-            lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 2000L, 3f, listener, Looper.getMainLooper())
-            listening = true
+        // Android 12+: системное местоположение (GPS + Wi-Fi + сети) — находит быстрее, в т.ч. в помещении.
+        // Иначе — GPS и сети вместе.
+        val providers = if (Build.VERSION.SDK_INT >= 31 && lm.allProviders.contains(LocationManager.FUSED_PROVIDER)) {
+            listOf(LocationManager.FUSED_PROVIDER)
+        } else {
+            listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).filter { lm.allProviders.contains(it) }
+        }
+        providers.forEach { p ->
+            runCatching {
+                lm.requestLocationUpdates(p, 1000L, 0f, listener, Looper.getMainLooper())
+                listening = true
+            }
+            // Последняя известная точка — сразу показать на карте
+            runCatching { lm.getLastKnownLocation(p) }.getOrNull()?.let { RunTracker.showLast(it.latitude, it.longitude) }
         }
     }
 
@@ -102,7 +117,13 @@ class RunService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_timer)
-            .setContentTitle(if (s.running) "Бег · $time" else "Бег · $time · пауза")
+            .setContentTitle(
+                when {
+                    s.phase == RunTracker.Phase.COUNTDOWN -> "Бег · старт через ${s.countdown}"
+                    s.running -> "Бег · $time"
+                    else -> "Бег · $time · пауза"
+                },
+            )
             .setContentText(if (s.hasFix) "Маршрут записывается" else "Поиск GPS…")
             .setColor(0xFF2196F3.toInt())
             .setColorized(true)
@@ -113,7 +134,7 @@ class RunService : Service() {
             .setContentIntent(open)
             .setCategory(NotificationCompat.CATEGORY_WORKOUT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .addAction(0, if (s.running) "Пауза" else "Продолжить", action(ACTION_TOGGLE, 31))
+            .apply { if (s.phase != RunTracker.Phase.COUNTDOWN) addAction(0, if (s.running) "Пауза" else "Продолжить", action(ACTION_TOGGLE, 31)) }
             .addAction(0, "Стоп", action(ACTION_STOP, 32))
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
@@ -146,13 +167,19 @@ class RunService : Service() {
         }
 
         fun start(context: Context) {
-            RunTracker.start()
+            RunTracker.start(ru.streetlift.tracker.timer.TimerPrefs.load(context).runCountdown)
             ContextCompat.startForegroundService(context, Intent(context, RunService::class.java))
         }
 
         fun toggle(context: Context) {
             RunTracker.toggle()
             context.startService(Intent(context, RunService::class.java))
+        }
+
+        /** Отменить во время обратного отсчёта. */
+        fun cancel(context: Context) {
+            RunTracker.cancel()
+            context.stopService(Intent(context, RunService::class.java))
         }
 
         /** Завершить и сохранить пробежку (если было хоть сколько-то времени). */

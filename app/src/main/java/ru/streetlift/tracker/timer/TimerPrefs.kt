@@ -26,6 +26,8 @@ object TimerPrefs {
         /** Секундомер (статика): задержка старта 0/3/5 с и пик каждые 0/5/10 с. */
         val stopwatchDelay: Int = 3,
         val stopwatchBeepEvery: Int = 5,
+        /** Бег: обратный отсчёт перед стартом, с (0 — без отсчёта). */
+        val runCountdown: Int = 5,
         /** Интервалы: подготовка, работа, отдых (с) и раунды. */
         val ivPrep: Int = 5,
         val ivWork: Int = 15,
@@ -71,6 +73,7 @@ object TimerPrefs {
             outSpeaker = p.getBoolean("outSpeaker", true),
             countdownBeeps = p.getBoolean("countdownBeeps", true),
             stopwatchDelay = p.getInt("swDelay", 3),
+            runCountdown = p.getInt("runCountdown", 5),
             stopwatchBeepEvery = p.getInt("swBeep", 5),
             ivPrep = p.getInt("ivPrep", 5),
             ivWork = p.getInt("ivWork", 15),
@@ -89,6 +92,7 @@ object TimerPrefs {
             .putBoolean("outSpeaker", prefs.outSpeaker)
             .putBoolean("countdownBeeps", prefs.countdownBeeps)
             .putInt("swDelay", prefs.stopwatchDelay)
+            .putInt("runCountdown", prefs.runCountdown)
             .putInt("swBeep", prefs.stopwatchBeepEvery)
             .putInt("ivPrep", prefs.ivPrep)
             .putInt("ivWork", prefs.ivWork)

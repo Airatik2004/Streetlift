@@ -41,6 +41,9 @@ fun RouteMap(
     interactive: Boolean = false,
     follow: Boolean = false,
     fallback: RunTracker.Pt? = null,
+    /** Где вы сейчас и точность (м) — синий круг на карте. */
+    current: RunTracker.Pt? = null,
+    accuracy: Float? = null,
 ) {
     val ctx = LocalContext.current
     val map = remember {
@@ -56,7 +59,27 @@ fun RouteMap(
     }
     DisposableEffect(map) { onDispose { map.onDetach() } }
     AndroidView(factory = { map }, modifier = modifier, update = { m ->
-        m.overlays.removeAll { it is Polyline }
+        m.overlays.removeAll { it is Polyline || it is org.osmdroid.views.overlay.Polygon }
+        current?.let { c ->
+            val gp = GeoPoint(c.lat, c.lon)
+            // Круг точности и точка «вы здесь»
+            m.overlays.add(
+                org.osmdroid.views.overlay.Polygon(m).apply {
+                    points = org.osmdroid.views.overlay.Polygon.pointsAsCircle(gp, (accuracy ?: 15f).toDouble().coerceIn(8.0, 500.0))
+                    fillPaint.color = 0x332196F3
+                    outlinePaint.color = 0x882196F3.toInt()
+                    outlinePaint.strokeWidth = 2f
+                },
+            )
+            m.overlays.add(
+                org.osmdroid.views.overlay.Polygon(m).apply {
+                    points = org.osmdroid.views.overlay.Polygon.pointsAsCircle(gp, 4.0)
+                    fillPaint.color = 0xFF2196F3.toInt()
+                    outlinePaint.color = 0xFFFFFFFF.toInt()
+                    outlinePaint.strokeWidth = 3f
+                },
+            )
+        }
         val pts = segments.flatten().map { GeoPoint(it.lat, it.lon) }
         segments.filter { it.size >= 2 }.forEach { seg ->
             m.overlays.add(
@@ -69,9 +92,13 @@ fun RouteMap(
             )
         }
         when {
-            follow && pts.isNotEmpty() -> {
+            follow && (pts.isNotEmpty() || current != null) -> {
                 if (m.zoomLevelDouble < 15.0) m.controller.setZoom(17.0)
-                m.controller.setCenter(pts.last())
+                m.controller.setCenter(current?.let { GeoPoint(it.lat, it.lon) } ?: pts.last())
+            }
+            current != null && pts.isEmpty() -> {
+                if (m.zoomLevelDouble < 15.0) m.controller.setZoom(16.0)
+                m.controller.setCenter(GeoPoint(current.lat, current.lon))
             }
             pts.size >= 2 -> {
                 val box = BoundingBox.fromGeoPointsSafe(pts)

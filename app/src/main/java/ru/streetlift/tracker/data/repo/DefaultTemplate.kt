@@ -40,33 +40,33 @@ object DefaultTemplate {
         Day(
             "День 1 · Выходы + ноги", false,
             listOf(
-                Ex("Выходы силой", EXPLOSIVE, 5..6, 6..10, 1..2, 2.5f),
-                Ex("Пистолетики", ACCESSORY, 3..4, 8..12, 2..2, 2.5f),
+                Ex("Выходы силой", EXPLOSIVE, 5..6, 6..10, 1..2, 1.25f),
+                Ex("Пистолетики", ACCESSORY, 3..4, 8..12, 2..2, 1.25f),
                 Ex("Обратные разведения на заднюю дельту", ISOLATION, 3..3, 15..20, 2..2, 1.25f, alwaysLast = true, shareKey = "rear_delt"),
             ),
         ),
         Day(
             "День 2 · Горизонт + 1 рука", false,
             listOf(
-                Ex("Отжимания в горизонте", HEAVY_LEVER, 3..3, 5..8, 1..2, 2.5f, StageGroups.LEVER),
-                Ex("Подтягивания на 1 руке", HEAVY_LEVER, 3..4, 3..6, 1..2, 2.5f),
-                Ex("Удержание горизонта", STATIC_HOLD, 3..3, 8..15, 2..2, 2.5f, StageGroups.LEVER, Metric.SECONDS),
+                Ex("Отжимания в горизонте", HEAVY_LEVER, 3..3, 5..8, 1..2, 1.25f, StageGroups.LEVER),
+                Ex("Подтягивания на 1 руке", HEAVY_LEVER, 3..4, 3..6, 1..2, 1.25f),
+                Ex("Удержание горизонта", STATIC_HOLD, 3..3, 8..15, 2..2, 1.25f, StageGroups.LEVER, Metric.SECONDS),
             ),
         ),
         Day(
             "День 3 · Многоповторка", false,
             listOf(
-                Ex("Отжимания на брусьях", HYPERTROPHY_PUMP, 4..4, 15..20, 2..2, 2.5f),
-                Ex("Подтягивания", HYPERTROPHY_PUMP, 4..4, 15..20, 2..2, 2.5f),
+                Ex("Отжимания на брусьях", HYPERTROPHY_PUMP, 4..4, 15..20, 2..2, 1.25f),
+                Ex("Подтягивания", HYPERTROPHY_PUMP, 4..4, 15..20, 2..2, 1.25f),
                 Ex("Обратные разведения на заднюю дельту", ISOLATION, 3..3, 15..20, 2..2, 1.25f, alwaysLast = true, shareKey = "rear_delt"),
             ),
         ),
         Day(
             "День 4 · Стойка + передний вис", false,
             listOf(
-                Ex("Отжимания в стойке на руках", HEAVY_LEVER, 4..5, 6..10, 1..2, 2.5f, StageGroups.HANDSTAND),
-                Ex("Подтягивания в переднем висе", HEAVY_LEVER, 3..3, 5..8, 1..2, 2.5f, StageGroups.LEVER),
-                Ex("Удержание переднего виса", STATIC_HOLD, 3..3, 8..15, 2..2, 2.5f, StageGroups.LEVER, Metric.SECONDS),
+                Ex("Отжимания в стойке на руках", HEAVY_LEVER, 4..5, 6..10, 1..2, 1.25f, StageGroups.HANDSTAND),
+                Ex("Подтягивания в переднем висе", HEAVY_LEVER, 3..3, 5..8, 1..2, 1.25f, StageGroups.LEVER),
+                Ex("Удержание переднего виса", STATIC_HOLD, 3..3, 8..15, 2..2, 1.25f, StageGroups.LEVER, Metric.SECONDS),
             ),
         ),
     )

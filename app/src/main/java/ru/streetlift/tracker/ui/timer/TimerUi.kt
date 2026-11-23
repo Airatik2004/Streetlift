@@ -135,10 +135,8 @@ private fun PresetRow(onPick: (Int) -> Unit, onManual: () -> Unit) {
         Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        FilledTonalButton(onClick = onManual) {
-            Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(4.dp))
-            Text("Своё")
+        FilledTonalIconButton(onClick = onManual) {
+            Icon(Icons.Filled.Edit, contentDescription = "Своё время", modifier = Modifier.size(18.dp))
         }
         PRESETS_SECONDS.forEach { sec ->
             OutlinedButton(
@@ -295,7 +293,6 @@ fun TimerScreen() {
         prefs = np
         TimerPrefs.save(ctx, np)
     }
-    var settingsFor by remember { mutableStateOf<Int?>(null) }
     // Экран не гаснет, пока идёт секундомер или интервалы
     KeepScreenOn(sw.active || iv.active)
 
@@ -319,63 +316,54 @@ fun TimerScreen() {
                     1 -> StopwatchPanel(sw)
                     else -> IntervalsPanel(iv, prefs, update)
                 }
-                OutlinedButton(onClick = { settingsFor = page }) {
-                    Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Настройки режима")
+                // Настройки режима — в блоке самого режима, под таймером
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ModeSettings(page, prefs, update)
+                    }
                 }
                 SignalSettingsCard(prefs, update)
             }
         }
     }
-    settingsFor?.let { mode -> ModeSettingsDialog(mode, prefs, update) { settingsFor = null } }
 }
 
-/** Отдельное окно с настройками режима. */
+/** Настройки режима — в блоке самого режима. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ModeSettingsDialog(mode: Int, prefs: TimerPrefs.Prefs, update: (TimerPrefs.Prefs) -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(listOf("Отдых", "Секундомер", "Интервалы")[mode]) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                when (mode) {
-                    0 -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Пики за 3 секунды до конца")
-                            Text(
-                                "короткий обратный отсчёт: пик-пик-пик",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(checked = prefs.countdownBeeps, onCheckedChange = { update(prefs.copy(countdownBeeps = it)) })
-                    }
-                    1 -> {
-                        ChoiceRow("Задержка старта", listOf(0 to "Выкл", 3 to "3с", 5 to "5с"), prefs.stopwatchDelay) {
-                            update(prefs.copy(stopwatchDelay = it))
-                        }
-                        ChoiceRow("Звуковая отсечка", listOf(0 to "Выкл", 5 to "5с", 10 to "10с"), prefs.stopwatchBeepEvery) {
-                            update(prefs.copy(stopwatchBeepEvery = it))
-                        }
-                        Text(
-                            "Эти же настройки — у секундомера статики на тренировке.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    else -> {
-                        IntervalStepper("Подготовка", Fmt.clock(prefs.ivPrep)) { d -> update(prefs.copy(ivPrep = (prefs.ivPrep + d * 5).coerceIn(0, 60))) }
-                        IntervalStepper("Работа", Fmt.clock(prefs.ivWork)) { d -> update(prefs.copy(ivWork = (prefs.ivWork + d * 5).coerceIn(5, 3600))) }
-                        IntervalStepper("Отдых", Fmt.clock(prefs.ivRest)) { d -> update(prefs.copy(ivRest = (prefs.ivRest + d * 5).coerceIn(0, 3600))) }
-                        IntervalStepper("Раунды", prefs.ivRounds.toString()) { d -> update(prefs.copy(ivRounds = (prefs.ivRounds + d).coerceIn(1, 99))) }
-                    }
-                }
+private fun ModeSettings(mode: Int, prefs: TimerPrefs.Prefs, update: (TimerPrefs.Prefs) -> Unit) {
+    when (mode) {
+        0 -> Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Пики за 3 секунды до конца")
+                Text(
+                    "короткий обратный отсчёт: пик-пик-пик",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Готово") } },
-    )
+            Switch(checked = prefs.countdownBeeps, onCheckedChange = { update(prefs.copy(countdownBeeps = it)) })
+        }
+        1 -> {
+            ChoiceRow("Задержка старта", listOf(0 to "Выкл", 3 to "3с", 5 to "5с"), prefs.stopwatchDelay) {
+                update(prefs.copy(stopwatchDelay = it))
+            }
+            ChoiceRow("Звуковая отсечка", listOf(0 to "Выкл", 5 to "5с", 10 to "10с"), prefs.stopwatchBeepEvery) {
+                update(prefs.copy(stopwatchBeepEvery = it))
+            }
+            Text(
+                "Эти же настройки — у секундомера статики на тренировке.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        else -> {
+            IntervalStepper("Подготовка", Fmt.clock(prefs.ivPrep)) { d -> update(prefs.copy(ivPrep = (prefs.ivPrep + d * 5).coerceIn(0, 60))) }
+            IntervalStepper("Работа", Fmt.clock(prefs.ivWork)) { d -> update(prefs.copy(ivWork = (prefs.ivWork + d * 5).coerceIn(5, 3600))) }
+            IntervalStepper("Отдых", Fmt.clock(prefs.ivRest)) { d -> update(prefs.copy(ivRest = (prefs.ivRest + d * 5).coerceIn(0, 3600))) }
+            IntervalStepper("Раунды", prefs.ivRounds.toString()) { d -> update(prefs.copy(ivRounds = (prefs.ivRounds + d).coerceIn(1, 99))) }
+        }
+    }
 }
 
 /** Держать экран включённым (FLAG_KEEP_SCREEN_ON) пока [on]. */
@@ -631,10 +619,10 @@ private fun IntervalPrograms(current: IntervalTimer.Config, onLoad: (TimerPrefs.
                     Text(p.name, Modifier.padding(horizontal = 14.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.primary)
                 }
             }
-            FilledTonalButton(onClick = { adding = true }) { Text("+ Своя") }
+            FilledTonalButton(onClick = { adding = true }) { Text("+") }
         }
         Text(
-            "Тап — загрузить, долгое нажатие — удалить. «+ Своя» сохраняет текущие подготовку/работу/отдых/раунды.",
+            "Тап — загрузить, долгое нажатие — удалить. «+» сохраняет текущие подготовку/работу/отдых/раунды.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

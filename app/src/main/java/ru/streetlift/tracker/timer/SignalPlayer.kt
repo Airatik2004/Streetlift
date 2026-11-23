@@ -54,9 +54,12 @@ object SignalPlayer {
         for (dev in targets(app, p)) {
             try {
                 val mp = MediaPlayer()
+                // Динамик — поток будильника (слышно в беззвучном режиме и при нулевой громкости медиа),
+                // гарнитура — мультимедиа (громкость как у музыки в наушниках)
+                val toBt = dev != null && dev.type in btTypes
                 mp.setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setUsage(if (toBt) AudioAttributes.USAGE_MEDIA else AudioAttributes.USAGE_ALARM)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build(),
                 )

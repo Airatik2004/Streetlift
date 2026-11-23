@@ -172,7 +172,12 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(text = { Text("Завершить тренировку") }, onClick = {
                         menu = false
-                        confirmFinish = true
+                        if (ui.doneSets >= ui.plannedSets) {
+                            TimerActions.reset()
+                            vm.finish { summary = it.ifBlank { "Тренировка сохранена." } }
+                        } else {
+                            confirmFinish = true
+                        }
                     })
                     DropdownMenuItem(text = { Text("Отменить тренировку") }, onClick = {
                         menu = false
@@ -190,7 +195,11 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                     cur == null -> {
                         Text("Все подходы сделаны 💪", style = MaterialTheme.typography.titleLarge)
                         Spacer(Modifier.height(10.dp))
-                        Button(onClick = { confirmFinish = true }, modifier = Modifier.fillMaxWidth()) {
+                        // Всё сделано — завершаем сразу, без подтверждения
+                        Button(onClick = {
+                            TimerActions.reset()
+                            vm.finish { summary = it.ifBlank { "Тренировка сохранена." } }
+                        }, modifier = Modifier.fillMaxWidth()) {
                             Text("Завершить тренировку")
                         }
                     }

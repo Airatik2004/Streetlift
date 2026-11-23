@@ -240,7 +240,9 @@ fun HistoryScreen(repo: WorkoutRepository, focusSessionId: Long? = null, onFocus
                         Column(Modifier.weight(1f)) {
                             Text(s.dayName, style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "${formatDateTime(s.startedAt)} · цикл ${s.roundNumber}",
+                                "${formatDateTime(s.startedAt)}" +
+                                    (s.priority?.let { p -> runCatching { ru.streetlift.tracker.domain.Priority.valueOf(p) }.getOrNull() }?.let { " · ${it.title.lowercase()}" } ?: "") +
+                                    " · цикл ${s.shownCycle} из 5",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

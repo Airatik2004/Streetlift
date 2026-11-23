@@ -154,15 +154,15 @@ data class ExerciseEntity(
     /** Прыжки на тумбу — прогрессия по высоте (Jumps). */
     val isJump: Boolean get() = name == JUMP_NAME
 
-    /** Чередование через цикл в Дне 1: пистолетики — нечётные циклы, прыжки — чётные. */
+    /** Чередование в Дне 1 по факту: идёт то из двух, что делалось давнее (первый раз — пистолетики). */
     val altSlot: Int? get() = when (name) {
         "Пистолетики" -> 0
         JUMP_NAME -> 1
         else -> null
     }
 
-    /** Есть ли упражнение в цикле номер [round] (с 1). */
-    fun activeInRound(round: Int): Boolean = altSlot == null || (round - 1).mod(2) == altSlot
+    /** Есть ли упражнение в Дне 1, если «через цикл» выпал слот [slot] (0 пистолетики, 1 прыжки). */
+    fun activeInSlot(slot: Int): Boolean = altSlot == null || altSlot == slot
 
     val jumpState: ru.streetlift.tracker.domain.Jumps.State?
         get() = heightCm?.let { ru.streetlift.tracker.domain.Jumps.State(it, weightKg, targetReps, plateauCm, declineStreak) }
@@ -263,7 +263,17 @@ data class SessionEntity(
     val rollback: String? = null,
     /** Первая тренировка после паузы ≥ 3 дней в подготовке к пику — на подход меньше. */
     val afterPause: Boolean = false,
-)
+    /** Номер цикла внутри мезоцикла (1..5) на момент тренировки; null — старые записи. */
+    val cycleInMeso: Int? = null,
+    /** День 1: что выпало «через цикл» — 0 пистолетики, 1 прыжки; null — старые записи (по чётности). */
+    val altSlot: Int? = null,
+) {
+    /** Цикл в мезоцикле для показа; у старых записей — из общего номера. */
+    val shownCycle: Int get() = cycleInMeso ?: ((roundNumber - 1).mod(SettingsEntity.DELOAD_EVERY) + 1)
+
+    /** Слот «через цикл» этой тренировки; у старых записей — по чётности общего номера. */
+    val effectiveAltSlot: Int get() = altSlot ?: (roundNumber - 1).mod(2)
+}
 
 @Serializable
 @Entity(

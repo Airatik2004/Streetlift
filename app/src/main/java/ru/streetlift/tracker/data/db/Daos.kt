@@ -138,6 +138,23 @@ interface SessionDao {
     @Query("SELECT * FROM sessions ORDER BY startedAt")
     suspend fun getAllSessions(): List<SessionEntity>
 
+    /** Последнее сделанное из пары «через цикл» (пистолетики / прыжки) в завершённых тренировках. */
+    @Query(
+        "SELECT l.exerciseName AS exerciseName, s.roundNumber AS roundNumber FROM set_logs l " +
+            "JOIN sessions s ON l.sessionId = s.id " +
+            "WHERE s.finishedAt IS NOT NULL AND l.exerciseName IN ('Пистолетики', 'Прыжки на тумбу') " +
+            "ORDER BY l.loggedAt DESC LIMIT 1",
+    )
+    fun observeLastAlt(): Flow<LastAlt?>
+
+    @Query(
+        "SELECT l.exerciseName AS exerciseName, s.roundNumber AS roundNumber FROM set_logs l " +
+            "JOIN sessions s ON l.sessionId = s.id " +
+            "WHERE s.finishedAt IS NOT NULL AND l.exerciseName IN ('Пистолетики', 'Прыжки на тумбу') " +
+            "ORDER BY l.loggedAt DESC LIMIT 1",
+    )
+    suspend fun getLastAlt(): LastAlt?
+
     @Query("DELETE FROM sessions WHERE id = :id")
     suspend fun deleteSession(id: Long)
 
@@ -210,3 +227,15 @@ interface StatsDao {
     @Query("DELETE FROM runs")
     suspend fun clearRuns()
 }
+
+/** Что из пары «через цикл» делалось последним и в каком общем цикле. */
+data class LastAlt(val exerciseName: String, val roundNumber: Int) {
+    /** Слот сделанного: 0 пистолетики, 1 прыжки. */
+    val slot: Int get() = if (exerciseName == JUMP_NAME) 1 else 0
+
+    /** Следующий по очереди слот. */
+    val nextSlot: Int get() = 1 - slot
+}
+
+/** Слот Дня 1 следующей тренировки: противоположный последнему сделанному; впервые — пистолетики. */
+fun nextAltSlot(last: LastAlt?): Int = last?.nextSlot ?: 0

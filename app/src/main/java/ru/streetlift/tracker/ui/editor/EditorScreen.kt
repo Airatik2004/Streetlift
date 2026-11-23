@@ -64,11 +64,13 @@ data class EditorUi(
     val days: List<DayEntity> = emptyList(),
     val exercises: Map<Long, List<ExerciseEntity>> = emptyMap(),
     val stages: List<StageEntity> = emptyList(),
+    /** Последнее сделанное из пары пистолетики / прыжки. */
+    val lastAlt: ru.streetlift.tracker.data.db.LastAlt? = null,
 )
 
 class EditorViewModel(private val repo: WorkoutRepository) : ViewModel() {
-    val state: StateFlow<EditorUi> = combine(repo.settings, repo.days, repo.exercises, repo.stages) { s, d, e, st ->
-        EditorUi(s, d, e.groupBy { it.dayId }.mapValues { (_, v) -> v.sortedBy { it.position } }, st)
+    val state: StateFlow<EditorUi> = combine(repo.settings, repo.days, repo.exercises, repo.stages, repo.lastAlt) { s, d, e, st, la ->
+        EditorUi(s, d, e.groupBy { it.dayId }.mapValues { (_, v) -> v.sortedBy { it.position } }, st, la)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EditorUi())
 
     fun saveExercise(e: ExerciseEntity) = viewModelScope.launch { repo.saveExercise(e) }
@@ -113,27 +115,33 @@ fun EditorScreen(repo: WorkoutRepository) {
         }
 
         // Два цикла подряд: текущий и следующий. В Дне 1 — то, что там реально будет
-        // (пистолетики в нечётных циклах, прыжки — в чётных); порядок — по приоритету мезоцикла,
+        // (пистолетики / прыжки по очереди по факту); порядок — по приоритету мезоцикла,
         // на подводке первыми идут упражнения пика.
         val round1 = s.completedRounds + 1
-        val nextMeso = if (s.cycleInMeso >= s.deloadEvery || s.forcedDeload) s.mesoIndex + 1 else s.mesoIndex
+        val mesoEnds = s.cycleInMeso >= s.deloadEvery || s.forcedDeload
+        val nextMeso = if (mesoEnds) s.mesoIndex + 1 else s.mesoIndex
+        val nextCycle = if (mesoEnds) 1 else s.cycleInMeso + 1
+        // День 1 этого цикла уже сделан — в первом блоке то, что делали; иначе — что будет
+        val last = ui.lastAlt
+        val slot0 = if (last != null && last.roundNumber == round1) last.slot else ru.streetlift.tracker.data.db.nextAltSlot(last)
         val workoutDay = maxOf(java.time.LocalDate.now().toEpochDay(), s.nextWorkoutEpochDay ?: 0L)
         val peakOn = ru.streetlift.tracker.domain.Peaking.phaseOn(s.peakEpochDay, workoutDay, s.peakSpanDays) !=
             ru.streetlift.tracker.domain.PeakPhase.NONE
         val peakIds = if (peakOn) s.peakIds else emptySet()
         listOf(0, 1).forEach { block ->
-            val round = round1 + block
+            val slot = if (block == 0) slot0 else 1 - slot0
             val priority = ru.streetlift.tracker.domain.Priority.forMeso(if (block == 0) s.mesoIndex else nextMeso)
+            val cycleNo = if (block == 0) s.cycleInMeso else nextCycle
             item(key = "head_$block") {
                 Column(Modifier.padding(top = if (block == 0) 0.dp else 8.dp)) {
                     Text(
-                        if (block == 0) "Цикл $round — текущий" else "Цикл $round — следующий",
+                        if (block == 0) "Текущий цикл" else "Следующий цикл",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        if (peakOn) "Подводка к пику: упражнения пика — первыми; приоритет: ${priority.title.lowercase()}"
-                        else "Приоритет: ${priority.title.lowercase()} (меняется с каждым мезоциклом)",
+                        ru.streetlift.tracker.domain.Priority.cycleLabel(priority, cycleNo, s.deloadEvery) +
+                            if (peakOn) " · подводка: упражнения пика — первыми" else "",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -148,7 +156,7 @@ fun EditorScreen(repo: WorkoutRepository) {
                                 Text("День ${day.position + 1} из 4", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                                 Text(day.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                             }
-                            if (block == 0 && day.position == s.currentDayIndex) Tag("Ближайший", MaterialTheme.colorScheme.primary)
+                            if (block == 0 && day.position == s.currentDayIndex) Tag("Следующий", MaterialTheme.colorScheme.primary)
                         }
                         // Суперсет — только в текущем цикле, чтобы не дублировать
                         if (block == 0 && dayExercises.size > 1) {
@@ -166,10 +174,10 @@ fun EditorScreen(repo: WorkoutRepository) {
                         }
                         HorizontalDivider()
                         ru.streetlift.tracker.domain.ProgramOrder.order(
-                            day.position, dayExercises.filter { it.activeInRound(round) }, priority,
+                            day.position, dayExercises.filter { it.activeInSlot(slot) }, priority,
                         ) { it.id in peakIds }.forEach { e ->
                             // Во втором цикле упражнение, которое было и в первом, показываем «на цикл вперёд»
-                            val ahead = block == 1 && e.activeInRound(round1)
+                            val ahead = block == 1 && e.activeInSlot(slot0)
                             ExerciseRow(e, s, block, ahead) { editExercise = e }
                         }
                     }

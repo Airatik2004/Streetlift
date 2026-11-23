@@ -14,12 +14,16 @@ enum class ExerciseType(val title: String) {
 enum class Metric { REPS, SECONDS }
 
 /** Приоритет дней 2–4: что идёт первым. */
-enum class Priority(val title: String) {
-    PRESS("Жим"), PULL("Тяга");
+enum class Priority(val title: String, val genitive: String) {
+    PRESS("Жим", "жима"), PULL("Тяга", "тяги");
 
     companion object {
         /** Чередование по мезоциклам: чётный — жим, нечётный — тяга (начинаем с жима). */
         fun forMeso(mesoIndex: Int): Priority = if (mesoIndex.mod(2) == 0) PRESS else PULL
+
+        /** «Мезоцикл жима · цикл 3 из 5». */
+        fun cycleLabel(priority: Priority, cycleInMeso: Int, total: Int = 5): String =
+            "Мезоцикл ${priority.genitive} · цикл $cycleInMeso из $total"
     }
 }
 

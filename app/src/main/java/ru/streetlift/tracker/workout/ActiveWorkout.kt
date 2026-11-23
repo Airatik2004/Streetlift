@@ -83,7 +83,7 @@ object ActiveWorkout {
             val sessionPeakIds = session.peakIds?.split(',')?.mapNotNull { it.trim().toLongOrNull() }?.toSet().orEmpty()
             val all = ProgramOrder.order(dayPos, session.dayId?.let { repo.getExercisesForDay(it) } ?: emptyList(), priority) { it.id in sessionPeakIds }
                 // Через цикл: пистолетики / прыжки на тумбу
-                .filter { it.activeInRound(session.roundNumber) }
+                .filter { it.activeInSlot(session.effectiveAltSlot) }
             // Подводка: у пиковых/фоновых свой план, часть упражнений пропускается
             val st = repo.getSettings()
             val bodyWeight = st.bodyWeightKg

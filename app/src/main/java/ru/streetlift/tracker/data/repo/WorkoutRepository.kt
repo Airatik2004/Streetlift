@@ -50,6 +50,8 @@ class WorkoutRepository(private val db: AppDatabase) {
     val activeSession: Flow<SessionEntity?> = sessionDao.observeActive()
     val lastFinishedSession: Flow<SessionEntity?> = sessionDao.observeLastFinished()
     val finishedSessions: Flow<List<SessionEntity>> = sessionDao.observeFinished()
+    /** Последнее сделанное из пары пистолетики / прыжки — от него зависит, что будет в Дне 1. */
+    val lastAlt: Flow<ru.streetlift.tracker.data.db.LastAlt?> = sessionDao.observeLastAlt()
     val allSets: Flow<List<SetLogEntity>> = sessionDao.observeAllSets()
     val stages: Flow<List<StageEntity>> = programDao.observeStages()
     val stageArchive: Flow<List<StageArchiveEntity>> = programDao.observeArchive()
@@ -151,6 +153,11 @@ class WorkoutRepository(private val db: AppDatabase) {
                 peakIds = s.peakExerciseIds.takeIf { phase != PeakPhase.NONE },
                 priority = s.priority.name,
                 afterPause = afterPause,
+                cycleInMeso = s.cycleInMeso,
+                // День 1: пистолетики или прыжки — то, что делалось давнее; фиксируется на всю тренировку
+                altSlot = if (programDao.getExercisesForDay(day.id).any { it.altSlot != null }) {
+                    ru.streetlift.tracker.data.db.nextAltSlot(sessionDao.getLastAlt())
+                } else null,
             ),
         )
     }
@@ -296,8 +303,8 @@ class WorkoutRepository(private val db: AppDatabase) {
         val lines = mutableListOf<String>()
         val peak = session.peakPhase?.let { runCatching { PeakPhase.valueOf(it) }.getOrNull() }
         if (peak != null) lines += "Выход на пик (${peak.title}) — рабочий план не меняется, результаты в истории."
-        // Через цикл (пистолетики / прыжки): не участвовавшее в этом цикле упражнение не трогаем
-        val updated = if (peak != null) emptyList() else exercises.filter { it.activeInRound(session.roundNumber) }.map { ex ->
+        // Через цикл (пистолетики / прыжки): не участвовавшее в этой тренировке упражнение не трогаем
+        val updated = if (peak != null) emptyList() else exercises.filter { it.activeInSlot(session.effectiveAltSlot) }.map { ex ->
             val exLogs = logs.filter { it.exerciseId == ex.id }
             // Своя плановая разгрузка упражнения (или общая принудительная) либо аварийная
             val planned = ex.plannedDeload(s.deloadEvery, session.isDeload)
@@ -363,7 +370,8 @@ class WorkoutRepository(private val db: AppDatabase) {
             dayIndex, days.size, s.deloadEvery,
         )
         if (adv.roundCompleted) {
-            lines += "Цикл ${s.completedRounds + 1} завершён."
+            lines += "${ru.streetlift.tracker.domain.Priority.cycleLabel(s.priority, s.cycleInMeso, s.deloadEvery)} завершён." +
+                if (adv.state.cycleInMeso == 1) " Начинается мезоцикл ${ru.streetlift.tracker.domain.Priority.forMeso(s.mesoIndex + 1).genitive}." else ""
         }
         settingsDao.upsert(
             s.withoutUndo().copy(

@@ -101,7 +101,8 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
             listOf(a, b, c, d, e)
         },
         repo.finishedSessions,
-    ) { base, finished ->
+        repo.lastAlt,
+    ) { base, finished, lastAlt ->
         @Suppress("UNCHECKED_CAST")
         val s = base[0] as SettingsEntity
         @Suppress("UNCHECKED_CAST")
@@ -121,7 +122,7 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
         val afterPause = phase == PeakPhase.PRE_PEAK && missed >= Peaking.PAUSE_DAYS
         val peakIds = s.peakIds
         val previews = if (day == null) emptyList() else ru.streetlift.tracker.domain.ProgramOrder.order(
-            day.position, exs.filter { it.dayId == day.id && it.activeInRound(s.completedRounds + 1) }.sortedBy { it.position }, s.priority,
+            day.position, exs.filter { it.dayId == day.id && it.activeInSlot(ru.streetlift.tracker.data.db.nextAltSlot(lastAlt)) }.sortedBy { it.position }, s.priority,
         ) { phase != PeakPhase.NONE && it.id in peakIds }
             .map { ExercisePreview(it, Peaking.resolve(it.toConfig(), it.toState(), it.type, phase == PeakPhase.NONE && it.plannedDeload(s.deloadEvery, global), phase, it.id in peakIds, s.bodyWeightKg)
                 ?.let { p -> if (afterPause) p.copy(sets = (p.sets - 1).coerceAtLeast(1)) else p }
@@ -213,14 +214,15 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
         item {
             Column {
                 Text("Дневник тренировок", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                // Разгрузка у каждого упражнения своя — в шапке только общий номер цикла
+                // Разгрузка у каждого упражнения своя — в шапке мезоцикл (жим/тяга) и цикл в нём 1..5
                 val extra = when {
                     ui.phase != PeakPhase.NONE -> " · выход на пик"
                     ui.globalDeload -> " · разгрузка всего цикла"
                     else -> ""
                 }
                 Text(
-                    "Цикл ${s.completedRounds + 1} · день ${ui.nextDayIndex + 1} из ${ui.days.size}$extra",
+                    ru.streetlift.tracker.domain.Priority.cycleLabel(s.priority, s.cycleInMeso, s.deloadEvery) +
+                        " · день ${ui.nextDayIndex + 1} из ${ui.days.size}$extra",
                     style = MaterialTheme.typography.bodyLarge,
                     color = if (ui.globalDeload) DeloadGreen else MaterialTheme.colorScheme.onSurfaceVariant,
                 )

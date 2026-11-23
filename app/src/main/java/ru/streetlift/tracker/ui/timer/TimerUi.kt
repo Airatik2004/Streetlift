@@ -333,7 +333,7 @@ fun TimerScreen() {
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 when (page) {
-                    0 -> ru.streetlift.tracker.run.RunPanel()
+                    0 -> ru.streetlift.tracker.run.RunPanel(prefs, update)
                     1 -> RestTimerPanel(recommendation = null, compact = false)
                     2 -> StopwatchPanel(sw)
                     else -> IntervalsPanel(iv, prefs, update)
@@ -345,10 +345,10 @@ fun TimerScreen() {
                         }
                     }
                 }
+                // Общий для всех режимов блок звука — внутри страницы, поэтому свайп по нему листает режимы
+                SignalSettingsCard(prefs, update)
             }
         }
-        // Общий блок звука стоит на месте; свайп по нему листает нижние вкладки (Цикл ↔ Таймер ↔ История)
-        SignalSettingsCard(prefs, update)
     }
 }
 

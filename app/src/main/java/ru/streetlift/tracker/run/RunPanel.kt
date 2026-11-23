@@ -40,7 +40,7 @@ import kotlinx.coroutines.delay
 /** «Бег» во вкладке «Таймер»: карта с маршрутом, время, обратный отсчёт, старт / пауза / стоп. */
 @SuppressLint("MissingPermission")
 @Composable
-fun RunPanel() {
+fun RunPanel(prefs: ru.streetlift.tracker.timer.TimerPrefs.Prefs, update: (ru.streetlift.tracker.timer.TimerPrefs.Prefs) -> Unit) {
     val ctx = LocalContext.current
     val st by RunTracker.state.collectAsStateWithLifecycle()
     var now by remember { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
@@ -51,7 +51,6 @@ fun RunPanel() {
         }
         now = android.os.SystemClock.elapsedRealtime()
     }
-    var prefs by remember { mutableStateOf(ru.streetlift.tracker.timer.TimerPrefs.load(ctx)) }
     var denied by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
     // Состояние разрешений и геолокации перепроверяется при возврате в приложение
@@ -190,8 +189,7 @@ fun RunPanel() {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Text("Автопауза, когда стоите", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
             androidx.compose.material3.Switch(checked = prefs.runAutoPause, onCheckedChange = {
-                prefs = prefs.copy(runAutoPause = it)
-                ru.streetlift.tracker.timer.TimerPrefs.save(ctx, prefs)
+                update(prefs.copy(runAutoPause = it))
             })
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
@@ -200,8 +198,7 @@ fun RunPanel() {
                 androidx.compose.material3.FilterChip(
                     selected = prefs.runKmCue == v,
                     onClick = {
-                        prefs = prefs.copy(runKmCue = v)
-                        ru.streetlift.tracker.timer.TimerPrefs.save(ctx, prefs)
+                        update(prefs.copy(runKmCue = v))
                     },
                     label = { Text(t) },
                 )
@@ -214,8 +211,7 @@ fun RunPanel() {
                 androidx.compose.material3.FilterChip(
                     selected = prefs.runCountdown == v,
                     onClick = {
-                        prefs = prefs.copy(runCountdown = v)
-                        ru.streetlift.tracker.timer.TimerPrefs.save(ctx, prefs)
+                        update(prefs.copy(runCountdown = v))
                     },
                     label = { Text(t) },
                 )

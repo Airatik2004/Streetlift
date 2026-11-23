@@ -121,10 +121,11 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
         val afterPause = phase == PeakPhase.PRE_PEAK && missed >= Peaking.PAUSE_DAYS
         val peakIds = s.peakIds
         val previews = if (day == null) emptyList() else ru.streetlift.tracker.domain.ProgramOrder.order(
-            day.position, exs.filter { it.dayId == day.id }.sortedBy { it.position }, s.priority,
+            day.position, exs.filter { it.dayId == day.id && it.activeInRound(s.completedRounds + 1) }.sortedBy { it.position }, s.priority,
         )
             .map { ExercisePreview(it, Peaking.resolve(it.toConfig(), it.toState(), it.type, phase == PeakPhase.NONE && it.plannedDeload(s.deloadEvery, global), phase, it.id in peakIds, s.bodyWeightKg)
-                ?.let { p -> if (afterPause) p.copy(sets = (p.sets - 1).coerceAtLeast(1)) else p }) }
+                ?.let { p -> if (afterPause) p.copy(sets = (p.sets - 1).coerceAtLeast(1)) else p }
+                ?.let { p -> if (it.isJump) ru.streetlift.tracker.domain.jumpPlan(it.jumpState, p) else p }) }
         val dayOrder = days.associate { it.id to it.position }
         HomeUiState(
             loading = false,
@@ -433,7 +434,8 @@ private fun PreviewRow(p: ExercisePreview, globalDeload: Boolean, deloadEvery: I
         }
         if (plan.isCalibration) {
             Text(
-                "${plan.sets} × ${Fmt.range(plan.repsMin, plan.repsMax)}${if (e.isSeconds) " с" else ""} · RIR ${plan.rirMin} · вес подбирается",
+                if (e.isJump) "${plan.sets} × ${plan.repsMin} · высота подбирается"
+                else "${plan.sets} × ${Fmt.range(plan.repsMin, plan.repsMax)}${if (e.isSeconds) " с" else ""} · RIR ${plan.rirMin} · вес подбирается",
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(
@@ -443,7 +445,8 @@ private fun PreviewRow(p: ExercisePreview, globalDeload: Boolean, deloadEvery: I
             )
         } else {
             Text(
-                "${Fmt.weight(plan.weightKg)} · ${plan.sets} × ${Fmt.range(plan.repsMin, plan.repsMax)}${if (e.isSeconds) " с" else ""} · ${Fmt.rir(plan.rirMin, plan.rirMax)}",
+                if (e.isJump) "${plan.heightCm} см · ${Fmt.weight(plan.weightKg)} · ${plan.sets} × ${plan.targetReps}"
+                else "${Fmt.weight(plan.weightKg)} · ${plan.sets} × ${Fmt.range(plan.repsMin, plan.repsMax)}${if (e.isSeconds) " с" else ""} · ${Fmt.rir(plan.rirMin, plan.rirMax)}",
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(

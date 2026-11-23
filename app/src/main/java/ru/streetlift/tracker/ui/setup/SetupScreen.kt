@@ -64,7 +64,7 @@ class SetupViewModel(private val repo: WorkoutRepository) : ViewModel() {
 }
 
 /** Черновик строки. */
-private data class Draft(val stage: String?, val weight: Float, val calibrate: Boolean)
+private data class Draft(val stage: String?, val weight: Float, val calibrate: Boolean, val height: Int = 50)
 
 /** «Настройка стартовых параметров» — показывается при первом запуске (и из редактора). */
 @Composable
@@ -81,7 +81,8 @@ fun SetupScreen(repo: WorkoutRepository) {
                     stage = e.leverageStage,
                     weight = e.loadScale.snap(e.weightKg),
                     // По умолчанию — подобрать на тренировке, если вес ещё не задан
-                    calibrate = e.mode == ExerciseMode.CALIBRATION || e.weightKg == 0f,
+                    calibrate = if (e.isJump) e.heightCm == null else e.mode == ExerciseMode.CALIBRATION || e.weightKg == 0f,
+                    height = e.heightCm ?: 50,
                 )
             }
         }
@@ -134,7 +135,16 @@ fun SetupScreen(repo: WorkoutRepository) {
                     }
                     if (!d.calibrate) {
                         androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            ru.streetlift.tracker.ui.common.WeightStepper(d.weight, e.loadScale, { drafts[e.id] = d.copy(weight = it) })
+                            if (e.isJump) {
+                                ru.streetlift.tracker.ui.common.Stepper(
+                                    label = "Высота тумбы, см",
+                                    value = "${d.height}",
+                                    onMinus = { drafts[e.id] = d.copy(height = (d.height - 5).coerceAtLeast(20)) },
+                                    onPlus = { drafts[e.id] = d.copy(height = d.height + 5) },
+                                )
+                            } else {
+                                ru.streetlift.tracker.ui.common.WeightStepper(d.weight, e.loadScale, { drafts[e.id] = d.copy(weight = it) })
+                            }
                         }
                     }
                 }
@@ -155,6 +165,7 @@ fun SetupScreen(repo: WorkoutRepository) {
                                         stage = d.stage,
                                         weightKg = if (d.calibrate) e.weightKg else d.weight,
                                         calibrate = d.calibrate,
+                                        heightCm = if (e.isJump && !d.calibrate) d.height else null,
                                     )
                                 },
                             )

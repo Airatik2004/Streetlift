@@ -14,6 +14,8 @@ import ru.streetlift.tracker.domain.PriorityMode
 import ru.streetlift.tracker.domain.PlanState
 
 /** Глобальное состояние программы (одна строка, id = 1). */
+const val JUMP_NAME = "Прыжки на тумбу"
+
 const val DEFAULT_BANDS = "Зелёная:75,Фиолетовая:45,Чёрная:30,Красная:20"
 
 @Serializable
@@ -138,7 +140,31 @@ data class ExerciseEntity(
     val cyclesSinceStage: Int = 99,
     /** Рабочих тренировок упражнения в текущем мезоцикле (калибровка не считается). */
     val deloadSessions: Int = 0,
+    /** Прыжки на тумбу: рабочая высота (null — ещё не калибровали) и высота плато, которую пробиваем. */
+    val heightCm: Int? = null,
+    val plateauCm: Int? = null,
 ) {
+    /** Прыжки на тумбу — прогрессия по высоте (Jumps). */
+    val isJump: Boolean get() = name == JUMP_NAME
+
+    /** Чередование через цикл в Дне 1: пистолетики — нечётные циклы, прыжки — чётные. */
+    val altSlot: Int? get() = when (name) {
+        "Пистолетики" -> 0
+        JUMP_NAME -> 1
+        else -> null
+    }
+
+    /** Есть ли упражнение в цикле номер [round] (с 1). */
+    fun activeInRound(round: Int): Boolean = altSlot == null || (round - 1).mod(2) == altSlot
+
+    val jumpState: ru.streetlift.tracker.domain.Jumps.State?
+        get() = heightCm?.let { ru.streetlift.tracker.domain.Jumps.State(it, weightKg, targetReps, plateauCm, declineStreak) }
+
+    fun withJump(s: ru.streetlift.tracker.domain.Jumps.State) = copy(
+        heightCm = s.heightCm, weightKg = s.weightKg, targetReps = s.reps, plateauCm = s.plateauCm, declineStreak = s.fails,
+        mode = ExerciseMode.ACTIVE, emergencyDeloadNext = false,
+    )
+
     /** Одностороннее: подход — сначала одна сторона, потом другая (пистолетики, подтягивания на 1 руке). */
     val unilateral: Boolean get() = name == "Пистолетики" || name == "Подтягивания на 1 руке"
 
@@ -164,7 +190,7 @@ data class ExerciseEntity(
     val outOfSuperset: Boolean get() = isSeconds || alwaysLast
 
     /** Резина для помощи: нельзя в стойке (облегчение стадиями) и в задней дельте (гантели). */
-    val allowBands: Boolean get() = stageGroup != ru.streetlift.tracker.domain.StageGroups.HANDSTAND && shareKey == null
+    val allowBands: Boolean get() = stageGroup != ru.streetlift.tracker.domain.StageGroups.HANDSTAND && shareKey == null && !isJump
 
     /** Шкала нагрузки: резины текущего набора → свой вес → +шаг. */
     val loadScale: ru.streetlift.tracker.domain.LoadScale
@@ -262,6 +288,8 @@ data class SetLogEntity(
     val isSeconds: Boolean = false,
     /** Сторона у односторонних упражнений: «L» — левая, «R» — правая; null — обе. */
     val side: String? = null,
+    /** Прыжки на тумбу: высота подхода, см. */
+    val heightCm: Int? = null,
 )
 
 /** Справочник стадий рычага: 7 встроенных + свои варианты пользователя. */

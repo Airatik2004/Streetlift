@@ -28,6 +28,8 @@ data class WorkoutUi(
     val defaultWeight: Float = 0f,
     val defaultReps: Int = 0,
     val defaultRir: Int = 2,
+    /** Прыжки на тумбу: высота по умолчанию, см. */
+    val defaultHeight: Int = 50,
     val doneSets: Int = 0,
     val plannedSets: Int = 0,
     val stepKey: String = "",
@@ -67,6 +69,7 @@ class WorkoutViewModel(
                 defaultWeight = r.defaults.weight,
                 defaultReps = r.defaults.reps,
                 defaultRir = r.defaults.rir,
+                defaultHeight = r.defaults.height ?: 50,
                 doneSets = r.doneSets,
                 plannedSets = r.plannedSets,
                 stepKey = r.stepKey,

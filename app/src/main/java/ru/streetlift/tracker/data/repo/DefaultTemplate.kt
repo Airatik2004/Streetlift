@@ -42,6 +42,8 @@ object DefaultTemplate {
             listOf(
                 Ex("Выходы силой", EXPLOSIVE, 5..6, 6..10, 1..2, 1.25f),
                 Ex("Пистолетики", ACCESSORY, 3..4, 8..12, 2..2, 1.25f),
+                // Через цикл с пистолетиками; растёт высота (Jumps)
+                Ex("Прыжки на тумбу", EXPLOSIVE, 4..4, 3..5, 2..2, 2.5f),
                 Ex("Обратные разведения на заднюю дельту", ISOLATION, 3..3, 15..20, 2..2, 1.25f, alwaysLast = true, shareKey = "rear_delt"),
             ),
         ),

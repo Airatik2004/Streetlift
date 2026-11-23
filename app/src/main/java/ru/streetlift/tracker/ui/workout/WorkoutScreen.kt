@@ -141,9 +141,10 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
     var weight by remember(ui.stepKey) { mutableFloatStateOf(ui.defaultWeight) }
     var reps by remember(ui.stepKey) { mutableIntStateOf(ui.defaultReps) }
     var rir by remember(ui.stepKey) { mutableIntStateOf(ui.defaultRir) }
+    var height by remember(ui.stepKey) { mutableIntStateOf(ui.defaultHeight) }
     // То, что стоит в полях, нужно и кнопке «Следующий» в уведомлении
-    LaunchedEffect(ui.stepKey, weight, reps, rir, ui.currentStage) {
-        ActiveWorkout.setDraft(ui.stepKey, Draft(weight, reps, rir, ui.currentStage))
+    LaunchedEffect(ui.stepKey, weight, reps, rir, height, ui.currentStage) {
+        ActiveWorkout.setDraft(ui.stepKey, Draft(weight, reps, rir, ui.currentStage, height))
     }
 
     val listState = rememberLazyListState()
@@ -207,8 +208,8 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                     ui.resting -> RestPanel(timer, ui)
                     else -> WorkPanel(
                         ui = ui,
-                        weight = weight, reps = reps, rir = rir,
-                        onWeight = { weight = it }, onReps = { reps = it }, onRir = { rir = it },
+                        weight = weight, reps = reps, rir = rir, height = height,
+                        onWeight = { weight = it }, onReps = { reps = it }, onRir = { rir = it }, onHeight = { height = it },
                         onSets = { ActiveWorkout.changeSets(cur.exercise.id, it) },
                         onStage = { vm.setStage(cur.exercise.id, it) },
                     )
@@ -255,6 +256,8 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                                     if (sided) {
                                         "${Fmt.weightValue(log.weightKg)} × ${sideLetter(log.side)} ${log.reps}" +
                                             (l2?.let { " / ${sideLetter(it.side)} ${it.reps}" } ?: "") + " · ${Fmt.rirValue(minOf(log.rir, l2?.rir ?: log.rir))}"
+                                    } else if (log.heightCm != null) {
+                                        "${log.heightCm} см · ${Fmt.weightValue(log.weightKg)} × ${log.reps}"
                                     } else {
                                         "${Fmt.weightValue(log.weightKg)} × ${log.reps}${if (log.isSeconds) " с" else ""} · ${Fmt.rirValue(log.rir)}"
                                     },
@@ -278,7 +281,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                 enabled = ui.resting,
             ) { ActiveWorkout.toggle(ctx) }
             PlayerButton(Icons.Filled.SkipNext, "Следующий", enabled = cur != null) {
-                ActiveWorkout.setDraft(ui.stepKey, Draft(weight, reps, rir, ui.currentStage))
+                ActiveWorkout.setDraft(ui.stepKey, Draft(weight, reps, rir, ui.currentStage, height))
                 ActiveWorkout.next(ctx)
             }
         }
@@ -397,9 +400,11 @@ private fun WorkPanel(
     weight: Float,
     reps: Int,
     rir: Int,
+    height: Int,
     onWeight: (Float) -> Unit,
     onReps: (Int) -> Unit,
     onRir: (Int) -> Unit,
+    onHeight: (Int) -> Unit,
     onSets: (Int) -> Unit,
     onStage: (String?) -> Unit,
 ) {
@@ -449,8 +454,12 @@ private fun WorkPanel(
         TextButton(onClick = { onSets(1) }, enabled = cur.plannedCount < cur.maxCount) { Text("+", fontSize = 20.sp) }
     }
     Text(
-        if (plan.isCalibration) "Калибровка: подберите вес/стадию на ${Fmt.range(plan.repsMin, plan.repsMax)} $unit с запасом ${plan.rirMin}"
-        else "${Fmt.weight(plan.weightKg)} · ${Fmt.range(plan.repsMin, plan.repsMax)} ${unit} (цель ${plan.targetReps}+) · ${Fmt.rir(plan.rirMin, plan.rirMax)}",
+        when {
+            cur.exercise.isJump && plan.isCalibration -> "Калибровка: подберите высоту, на которую уверенно делаете ${plan.targetReps} прыжка"
+            cur.exercise.isJump -> "${plan.heightCm} см · ${Fmt.weight(plan.weightKg)} · ${plan.targetReps} прыжков, чистое приземление"
+            plan.isCalibration -> "Калибровка: подберите вес/стадию на ${Fmt.range(plan.repsMin, plan.repsMax)} $unit с запасом ${plan.rirMin}"
+            else -> "${Fmt.weight(plan.weightKg)} · ${Fmt.range(plan.repsMin, plan.repsMax)} ${unit} (цель ${plan.targetReps}+) · ${Fmt.rir(plan.rirMin, plan.rirMax)}"
+        },
         style = MaterialTheme.typography.bodyMedium,
         textAlign = TextAlign.Center,
     )
@@ -473,31 +482,52 @@ private fun WorkPanel(
         }
     }
 
-    ru.streetlift.tracker.ui.common.WeightStepper(
-        weight = weight,
-        scale = cur.exercise.loadScale,
-        onChange = onWeight,
-        onValueClick = { editWeight = true },
-    )
+    if (cur.exercise.isJump) {
+        // Прыжки: высота ±5 см и вес 0 / 2,5 / 5 кг
+        Stepper(
+            label = "Высота, см",
+            value = "$height",
+            onMinus = { onHeight((height - ru.streetlift.tracker.domain.Jumps.STEP_CM).coerceAtLeast(ru.streetlift.tracker.domain.Jumps.MIN_CM)) },
+            onPlus = { onHeight(height + ru.streetlift.tracker.domain.Jumps.STEP_CM) },
+        )
+        Spacer(Modifier.height(6.dp))
+        Stepper(
+            label = "Вес",
+            value = Fmt.weightValue(weight),
+            onMinus = { onWeight((weight - 2.5f).coerceAtLeast(0f)) },
+            onPlus = { onWeight((weight + 2.5f).coerceAtMost(ru.streetlift.tracker.domain.Jumps.HEAVY_KG)) },
+        )
+    } else {
+        ru.streetlift.tracker.ui.common.WeightStepper(
+            weight = weight,
+            scale = cur.exercise.loadScale,
+            onChange = onWeight,
+            onValueClick = { editWeight = true },
+        )
+    }
     Spacer(Modifier.height(6.dp))
     if (cur.exercise.isSeconds) {
         HoldStopwatch(onResult = onReps)
         Spacer(Modifier.height(6.dp))
     }
     Stepper(
-        label = if (cur.exercise.isSeconds) "Секунды (±1)" else "Повторы",
+        label = when {
+            cur.exercise.isJump -> "Прыжков (удачных)"
+            cur.exercise.isSeconds -> "Секунды (±1)"
+            else -> "Повторы"
+        },
         value = reps.toString(),
         onMinus = { onReps((reps - 1).coerceAtLeast(0)) },
         onPlus = { onReps(reps + 1) },
         onValueClick = { editReps = true },
     )
     Spacer(Modifier.height(8.dp))
-    Text(
+    if (!cur.exercise.isJump) Text(
         if (cur.exercise.isSeconds) "Запас, сек до потери геометрии (RIR)" else "Запас (RIR)",
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    if (!cur.exercise.isJump) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         (0..5).forEach { v ->
             FilterChip(selected = rir == v, onClick = { onRir(v) }, label = { Text(Fmt.rirValue(v)) })
         }

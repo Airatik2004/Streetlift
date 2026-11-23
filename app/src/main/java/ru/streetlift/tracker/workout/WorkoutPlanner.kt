@@ -51,7 +51,7 @@ sealed interface StepRow {
 }
 
 /** Значения для ввода подхода. */
-data class Draft(val weight: Float, val reps: Int, val rir: Int, val stage: String?)
+data class Draft(val weight: Float, val reps: Int, val rir: Int, val stage: String?, val height: Int? = null)
 
 /** Полное вычисленное состояние тренировки на текущий момент. */
 data class PlanResult(
@@ -147,6 +147,7 @@ object WorkoutPlanner {
             reps = pf?.reps ?: prevLog?.reps ?: current?.plan?.targetReps ?: 0,
             rir = pf?.rir ?: prevLog?.rir ?: current?.plan?.rirMin ?: 2,
             stage = pf?.stage ?: prevLog?.leverageStage ?: current?.exercise?.leverageStage,
+            height = pf?.height ?: prevLog?.heightCm ?: current?.plan?.heightCm ?: if (current?.exercise?.isJump == true) 50 else null,
         )
         return PlanResult(
             session = session,

@@ -185,11 +185,13 @@ private fun RecordsTab(ui: StatsUi, vm: StatsViewModel, name: String, stage: Str
     val rows = Records.table(ui.entries, name, stage, today)
     val seconds = ui.entries.firstOrNull { it.name == name }?.isSeconds
         ?: ui.exercises.firstOrNull { it.name == name }?.isSeconds ?: false
+    val height = ui.entries.firstOrNull { it.name == name }?.isHeight ?: false
     var adding by remember { mutableStateOf(false) }
     var toDelete by remember { mutableStateOf<Long?>(null) }
 
     Text(
-        "Лучший один подход при каждом весе${if (seconds) " (секунды)" else ""}. Зелёным — введённые вручную; долгое нажатие — удалить.",
+        if (height) "Максимальная высота при каждом весе. Зелёным — введённые вручную; долгое нажатие — удалить."
+        else "Лучший один подход при каждом весе${if (seconds) " (секунды)" else ""}. Зелёным — введённые вручную; долгое нажатие — удалить.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -217,7 +219,7 @@ private fun RecordsTab(ui: StatsUi, vm: StatsViewModel, name: String, stage: Str
                                 Text("—", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             } else {
                                 Text(
-                                    "${b.value}${if (seconds) " с" else ""}",
+                                    "${b.value}${if (seconds) " с" else if (height) " см" else ""}",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.SemiBold,
                                     color = if (b.manualId != null) ManualGreen else Color.Unspecified,
@@ -359,7 +361,11 @@ private fun ChartTab(
     var wKey by rememberSaveable(name, stage) { mutableStateOf<Int?>(null) }
     val w = weights.firstOrNull { Records.key(it) == wKey } ?: weights.firstOrNull()
     val seconds = ui.entries.firstOrNull { it.name == name }?.isSeconds ?: false
-    val unit = if (seconds) " с" else ""
+    val unit = when {
+        seconds -> " с"
+        ui.entries.firstOrNull { it.name == name }?.isHeight == true -> " см"
+        else -> ""
+    }
     var picking by remember { mutableStateOf<Int?>(null) } // 0 — «с», 1 — «по»
     var toDelete by remember { mutableStateOf<Long?>(null) }
     var picked by remember(name, stage, w, from, to) { mutableStateOf<Long?>(null) }

@@ -210,6 +210,10 @@ class TimerService : Service() {
         val cur = r.current ?: return "Откройте приложение, чтобы завершить тренировку"
         val p = cur.plan
         val u = if (cur.exercise.isSeconds) "с" else "повт."
+        if (cur.exercise.isJump) {
+            return if (p.isCalibration) "Калибровка высоты · ${p.targetReps} прыжка"
+            else "${p.heightCm} см · ${Fmt.weight(p.weightKg)} · ${p.targetReps} прыжков"
+        }
         return if (p.isCalibration) "Калибровка · ${Fmt.range(p.repsMin, p.repsMax)} $u · RIR ${p.rirMin}"
         else "${Fmt.weight(p.weightKg)} · ${Fmt.range(p.repsMin, p.repsMax)} $u · ${Fmt.rir(p.rirMin, p.rirMax)}"
     }

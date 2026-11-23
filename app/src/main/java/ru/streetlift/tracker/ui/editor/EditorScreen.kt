@@ -171,7 +171,9 @@ fun EditorScreen(repo: WorkoutRepository) {
                             }
                             if (e.mode != ExerciseMode.CALIBRATION) {
                                 Text(
-                                    "Сейчас: ${Fmt.weight(e.weightKg)}, ${e.plannedSets} подх., цель ${e.targetReps}+${if (e.isSeconds) " с" else ""}" +
+                                    (if (e.isJump) "Сейчас: ${e.jumpState?.let { ru.streetlift.tracker.domain.Jumps.describe(it) } ?: "высота не задана"}"
+                                    else "Сейчас: ${Fmt.weight(e.weightKg)}, ${e.plannedSets} подх., цель ${e.targetReps}+${if (e.isSeconds) " с" else ""}") +
+                                        (if (e.altSlot != null) " · через цикл" else "") +
                                         if (e.emergencyDeloadNext) " · разгрузка на следующей" else "",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.primary,
@@ -300,6 +302,7 @@ private fun CalibrationDialog(
     var deload by remember { mutableStateOf(exercise.emergencyDeloadNext) }
     var skipPlanned by remember { mutableStateOf(exercise.skipPlannedDeload == true) }
     var weight by remember { mutableStateOf(exercise.loadScale.snap(exercise.weightKg)) }
+    var height by remember { mutableStateOf(exercise.heightCm ?: 50) }
     var error by remember { mutableStateOf<String?>(null) }
     val stageChanged = stage != exercise.leverageStage
 
@@ -309,7 +312,16 @@ private fun CalibrationDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    ru.streetlift.tracker.ui.common.WeightStepper(weight, exercise.loadScale, { weight = it })
+                    if (exercise.isJump) {
+                        ru.streetlift.tracker.ui.common.Stepper(
+                            label = "Высота, см",
+                            value = "$height",
+                            onMinus = { height = (height - ru.streetlift.tracker.domain.Jumps.STEP_CM).coerceAtLeast(ru.streetlift.tracker.domain.Jumps.MIN_CM) },
+                            onPlus = { height += ru.streetlift.tracker.domain.Jumps.STEP_CM },
+                        )
+                    } else {
+                        ru.streetlift.tracker.ui.common.WeightStepper(weight, exercise.loadScale, { weight = it })
+                    }
                 }
                 if (exercise.stageGroup != null) {
                     StagePicker(
@@ -362,7 +374,8 @@ private fun CalibrationDialog(
                 run {
                     onSave(
                         exercise.copy(
-                            weightKg = w,
+                            weightKg = if (exercise.isJump) exercise.weightKg else w,
+                            heightCm = if (exercise.isJump) height else exercise.heightCm,
                             leverageStage = stage,
                             mode = if (calibrate || stageChanged) ExerciseMode.CALIBRATION else ExerciseMode.ACTIVE,
                             emergencyDeloadNext = deload,

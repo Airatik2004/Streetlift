@@ -18,6 +18,8 @@ object Records {
         val epochDay: Long,
         val sessionId: Long? = null,
         val manualId: Long? = null,
+        /** Прыжки на тумбу: значение — высота, см. */
+        val isHeight: Boolean = false,
     ) {
         val weightKey: Int get() = key(weight)
     }

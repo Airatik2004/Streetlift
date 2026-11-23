@@ -74,6 +74,8 @@ data class SessionPlan(
     val peakPhase: PeakPhase = PeakPhase.NONE,
     /** Упражнение выбрано для выхода на пик. */
     val isPeakTarget: Boolean = false,
+    /** Прыжки на тумбу: высота, см. */
+    val heightCm: Int? = null,
 )
 
 data class CycleState(

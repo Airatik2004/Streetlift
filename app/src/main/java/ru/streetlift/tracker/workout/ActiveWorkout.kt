@@ -80,6 +80,8 @@ object ActiveWorkout {
             val dayPos = session.dayId?.let { repo.getDay(it)?.position } ?: 0
             val priority = session.priority?.let { runCatching { Priority.valueOf(it) }.getOrNull() } ?: Priority.PRESS
             val all = ProgramOrder.order(dayPos, session.dayId?.let { repo.getExercisesForDay(it) } ?: emptyList(), priority)
+                // Через цикл: пистолетики / прыжки на тумбу
+                .filter { it.activeInRound(session.roundNumber) }
             // Подводка: у пиковых/фоновых свой план, часть упражнений пропускается
             val st = repo.getSettings()
             val bodyWeight = st.bodyWeightKg
@@ -89,6 +91,7 @@ object ActiveWorkout {
                 Peaking.resolve(e.toConfig(), e.toState(), e.type, phase == PeakPhase.NONE && e.plannedDeload(st.deloadEvery, session.isDeload), phase, e.id in peakIds, bodyWeight)
                     // Первая тренировка подготовки после паузы — на подход меньше
                     ?.let { if (session.afterPause) it.copy(sets = (it.sets - 1).coerceAtLeast(1)) else it }
+                    ?.let { if (e.isJump) ru.streetlift.tracker.domain.jumpPlan(e.jumpState, it) else it }
                     ?.let { e.id to it }
             }.toMap()
             val exercises = all.filter { it.id in plans }
@@ -131,7 +134,7 @@ object ActiveWorkout {
         }
         val cur = r.current ?: return
         val d = if (byPlan) {
-            Draft(cur.plan.weightKg, cur.plan.targetReps, cur.plan.rirMax, r.defaults.stage)
+            Draft(cur.plan.weightKg, cur.plan.targetReps, cur.plan.rirMax, r.defaults.stage, cur.plan.heightCm)
         } else {
             draft?.takeIf { draftKey == r.stepKey } ?: r.defaults
         }
@@ -152,6 +155,7 @@ object ActiveWorkout {
                     isCalibration = cur.plan.isCalibration,
                     isSeconds = cur.exercise.isSeconds,
                     side = r.side,
+                    heightCm = if (cur.exercise.isJump) d.height ?: cur.plan.heightCm ?: 50 else null,
                 ),
             )
             prefill.update { it - r.stepKey }
@@ -173,7 +177,7 @@ object ActiveWorkout {
         val logs = r.blocks.flatMap { it.logs }
         val last = logs.maxByOrNull { it.loggedAt } ?: return
         val key = "${last.exerciseId}_${logs.count { it.exerciseId == last.exerciseId } - 1}"
-        prefill.update { it + (key to Draft(last.weightKg, last.reps, last.rir, last.leverageStage)) }
+        prefill.update { it + (key to Draft(last.weightKg, last.reps, last.rir, last.leverageStage, last.heightCm)) }
         val app = ctx.applicationContext
         scope.launch { repo(app).deleteSet(last) }
     }

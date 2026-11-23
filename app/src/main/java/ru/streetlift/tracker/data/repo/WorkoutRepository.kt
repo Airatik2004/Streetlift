@@ -297,11 +297,29 @@ class WorkoutRepository(private val db: AppDatabase) {
         val lines = mutableListOf<String>()
         val peak = session.peakPhase?.let { runCatching { PeakPhase.valueOf(it) }.getOrNull() }
         if (peak != null) lines += "Выход на пик (${peak.title}) — рабочий план не меняется, результаты в истории."
-        val updated = if (peak != null) emptyList() else exercises.map { ex ->
+        // Через цикл (пистолетики / прыжки): не участвовавшее в этом цикле упражнение не трогаем
+        val updated = if (peak != null) emptyList() else exercises.filter { it.activeInRound(session.roundNumber) }.map { ex ->
             val exLogs = logs.filter { it.exerciseId == ex.id }
             // Своя плановая разгрузка упражнения (или общая принудительная) либо аварийная
             val planned = ex.plannedDeload(s.deloadEvery, session.isDeload)
             val wasDeload = planned || ex.emergencyDeloadNext
+            if (ex.isJump) {
+                // Прыжки: высота, вес и прыжки по своим правилам
+                val jl = exLogs.map { ru.streetlift.tracker.domain.Jumps.Log(it.heightCm ?: 0, it.weightKg, it.reps) }
+                val st = ex.jumpState
+                val (newState, msg) = if (st == null || ex.mode == ExerciseMode.CALIBRATION) {
+                    if (jl.isEmpty()) st to "прыжков нет — калибровка на следующей"
+                    else ru.streetlift.tracker.domain.Jumps.fromCalibration(jl, st).let { it to "калибровка → ${ru.streetlift.tracker.domain.Jumps.describe(it)}" }
+                } else ru.streetlift.tracker.domain.Jumps.next(st, jl, wasDeload).let { it.state to it.message }
+                lines += "• ${ex.name}: $msg"
+                val worked = exLogs.isNotEmpty() && ex.mode == ExerciseMode.ACTIVE
+                var sessions = ex.deloadSessions
+                if (worked) {
+                    sessions += 1
+                    if (s.deloadEvery > 0 && sessions >= s.deloadEvery || session.isDeload) sessions = 0
+                }
+                return@map (newState?.let { ex.withJump(it) } ?: ex).copy(deloadSessions = sessions, skipPlannedDeload = if (sessions == 0) null else ex.skipPlannedDeload)
+            }
             val result = ProgressionEngine.computeNext(
                 ex.toConfig(),
                 ex.toState(),
@@ -364,7 +382,7 @@ class WorkoutRepository(private val db: AppDatabase) {
             val finishedIds = sessionDao.getAllSessions().filter { it.finishedAt != null || it.id == sessionId }.map { it.id }.toSet()
             val entries = recordEntries(sessionDao.getAllSets().filter { it.sessionId in finishedIds }, statsDao.getManual())
             ru.streetlift.tracker.domain.Records.newRecords(entries, sessionId).forEach { r ->
-                lines += "Рекорд: ${r.name}${r.stage?.let { " ($it)" } ?: ""} — ${Fmt.weight(r.weight)} × ${r.value}${if (r.isSeconds) " с" else ""}"
+                lines += "Рекорд: ${r.name}${r.stage?.let { " ($it)" } ?: ""} — ${if (r.isHeight) "${r.value} см · ${Fmt.weight(r.weight)}" else "${Fmt.weight(r.weight)} × ${r.value}${if (r.isSeconds) " с" else ""}"}"
             }
         }
         val summary = lines.joinToString("\n")
@@ -543,7 +561,7 @@ class WorkoutRepository(private val db: AppDatabase) {
 
     // ---------------- Первый запуск ----------------
 
-    data class SetupDraft(val exerciseId: Long, val stage: String?, val weightKg: Float, val calibrate: Boolean)
+    data class SetupDraft(val exerciseId: Long, val stage: String?, val weightKg: Float, val calibrate: Boolean, val heightCm: Int? = null)
 
     /** «Настройка стартовых параметров»: вес известен → ACTIVE, иначе → CALIBRATION. */
     suspend fun completeSetup(drafts: List<SetupDraft>) = db.withTransaction {
@@ -561,7 +579,7 @@ class WorkoutRepository(private val db: AppDatabase) {
                 emergencyDeloadNext = false,
                 lastScore = null,
                 lastScoreWeight = null,
-            )
+            ).let { if (it.isJump) it.copy(heightCm = d.heightCm, weightKg = 0f, targetReps = 3, plateauCm = null) else it }
         }
         if (updated.isNotEmpty()) {
             programDao.updateExercises(updated)
@@ -723,6 +741,7 @@ fun recordEntries(
 ): List<ru.streetlift.tracker.domain.Records.Entry> {
     val zone = java.time.ZoneId.systemDefault()
     return sets.filter { it.reps > 0 }.map {
+        val jump = it.heightCm != null
         ru.streetlift.tracker.domain.Records.Entry(
             name = it.exerciseName + when (it.side) {
                 "L" -> " · левая"
@@ -731,8 +750,10 @@ fun recordEntries(
             },
             stage = it.leverageStage,
             weight = it.weightKg,
-            value = it.reps,
+            // Прыжки: рекорд — высота при весе
+            value = if (jump) it.heightCm!! else it.reps,
             isSeconds = it.isSeconds,
+            isHeight = jump,
             epochDay = java.time.Instant.ofEpochMilli(it.loggedAt).atZone(zone).toLocalDate().toEpochDay(),
             sessionId = it.sessionId,
         )

@@ -262,7 +262,8 @@ fun HistoryScreen(repo: WorkoutRepository, focusSessionId: Long? = null, onFocus
                                 ) {
                                     Text(
                                         (when (log.side) { "L" -> "Л "; "R" -> "П "; else -> "" }) +
-                                            "${Fmt.weightValue(log.weightKg)}×${log.reps}${if (log.isSeconds) "с" else ""} · ${Fmt.rirValue(log.rir)}",
+                                            (if (log.heightCm != null) "${log.heightCm} см · ${Fmt.weightValue(log.weightKg)}×${log.reps}"
+                                            else "${Fmt.weightValue(log.weightKg)}×${log.reps}${if (log.isSeconds) "с" else ""} · ${Fmt.rirValue(log.rir)}"),
                                         style = MaterialTheme.typography.bodySmall,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                     )

@@ -104,7 +104,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
     var confirmFinish by remember { mutableStateOf(false) }
     var confirmDiscard by remember { mutableStateOf(false) }
     var summary by remember { mutableStateOf<String?>(null) }
-    var logToDelete by remember { mutableStateOf<SetLogEntity?>(null) }
+    var logToDelete by remember { mutableStateOf<Pair<SetLogEntity, SetLogEntity?>?>(null) }
 
     BackHandler { onExit() }
 
@@ -236,7 +236,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                             Modifier
                                 .fillMaxWidth()
                                 .background(bg)
-                                .combinedClickable(onClick = {}, onLongClick = { if (log != null) logToDelete = log })
+                                .combinedClickable(onClick = {}, onLongClick = { if (log != null) logToDelete = log to row.log2 })
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -320,9 +320,10 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
             },
         )
     }
-    logToDelete?.let { log ->
+    logToDelete?.let { (log, log2) ->
         SetEditDialog(
             log = log,
+            log2 = log2,
             scale = ui.blocks.firstOrNull { it.exercise.id == log.exerciseId }?.exercise?.loadScale,
             onDismiss = { logToDelete = null },
             onSave = {

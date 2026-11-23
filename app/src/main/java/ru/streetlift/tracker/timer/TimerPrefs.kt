@@ -28,6 +28,10 @@ object TimerPrefs {
         val stopwatchBeepEvery: Int = 5,
         /** Бег: обратный отсчёт перед стартом, с (0 — без отсчёта). */
         val runCountdown: Int = 5,
+        /** Бег: автопауза, когда стоим. */
+        val runAutoPause: Boolean = true,
+        /** Бег: отсечка каждого километра — 0 выкл, 1 сигнал, 2 голос. */
+        val runKmCue: Int = 2,
         /** Интервалы: подготовка, работа, отдых (с) и раунды. */
         val ivPrep: Int = 5,
         val ivWork: Int = 15,
@@ -74,6 +78,8 @@ object TimerPrefs {
             countdownBeeps = p.getBoolean("countdownBeeps", true),
             stopwatchDelay = p.getInt("swDelay", 3),
             runCountdown = p.getInt("runCountdown", 5),
+            runAutoPause = p.getBoolean("runAutoPause", true),
+            runKmCue = p.getInt("runKmCue", 2),
             stopwatchBeepEvery = p.getInt("swBeep", 5),
             ivPrep = p.getInt("ivPrep", 5),
             ivWork = p.getInt("ivWork", 15),
@@ -93,6 +99,8 @@ object TimerPrefs {
             .putBoolean("countdownBeeps", prefs.countdownBeeps)
             .putInt("swDelay", prefs.stopwatchDelay)
             .putInt("runCountdown", prefs.runCountdown)
+            .putBoolean("runAutoPause", prefs.runAutoPause)
+            .putInt("runKmCue", prefs.runKmCue)
             .putInt("swBeep", prefs.stopwatchBeepEvery)
             .putInt("ivPrep", prefs.ivPrep)
             .putInt("ivWork", prefs.ivWork)

@@ -41,8 +41,95 @@ class RunService : Service() {
     private var listening = false
 
     private val listener = LocationListener { loc: Location ->
-        // Позиция видна всегда; в маршрут идут только точки лучше 30 м (решает RunTracker)
-        RunTracker.onLocation(loc.latitude, loc.longitude, if (loc.hasAccuracy()) loc.accuracy else null)
+        // Позиция видна всегда; в маршрут идут только точки лучше 30 м (решает RunTracker).
+        // Высота — по барометру, если он есть, иначе по GPS.
+        val alt = baroAlt ?: if (loc.hasAltitude()) loc.altitude else null
+        RunTracker.onLocation(loc.latitude, loc.longitude, if (loc.hasAccuracy()) loc.accuracy else null, alt)
+            ?.let { announceKm(it) }
+    }
+
+    // ---- Барометр: высота точнее GPS ----
+    @Volatile private var baroAlt: Double? = null
+    private var baroOn = false
+    private val baroListener = object : android.hardware.SensorEventListener {
+        override fun onSensorChanged(e: android.hardware.SensorEvent) {
+            val a = android.hardware.SensorManager.getAltitude(android.hardware.SensorManager.PRESSURE_STANDARD_ATMOSPHERE, e.values[0]).toDouble()
+            baroAlt = baroAlt?.let { it + (a - it) * 0.2 } ?: a
+        }
+        override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
+    }
+
+    private fun startBaro() {
+        if (baroOn) return
+        val sm = getSystemService(android.hardware.SensorManager::class.java) ?: return
+        val sensor = sm.getDefaultSensor(android.hardware.Sensor.TYPE_PRESSURE) ?: return
+        baroOn = sm.registerListener(baroListener, sensor, android.hardware.SensorManager.SENSOR_DELAY_NORMAL)
+    }
+
+    // ---- Голосовые отсечки ----
+    private var tts: android.speech.tts.TextToSpeech? = null
+    @Volatile private var ttsReady = false
+
+    private fun initTts() {
+        if (tts != null) return
+        tts = android.speech.tts.TextToSpeech(applicationContext) { status ->
+            val t = tts ?: return@TextToSpeech
+            if (status == android.speech.tts.TextToSpeech.SUCCESS) {
+                val r = t.setLanguage(java.util.Locale("ru", "RU"))
+                ttsReady = r != android.speech.tts.TextToSpeech.LANG_MISSING_DATA && r != android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED
+                t.setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build(),
+                )
+                t.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                    override fun onStart(id: String?) {}
+                    override fun onDone(id: String?) { releaseFocus() }
+                    @Deprecated("old api")
+                    override fun onError(id: String?) { releaseFocus() }
+                })
+            }
+        }
+    }
+
+    private var focus: android.media.AudioFocusRequest? = null
+
+    private fun releaseFocus() {
+        focus?.let { getSystemService(android.media.AudioManager::class.java).abandonAudioFocusRequest(it) }
+        focus = null
+    }
+
+    /** Отсечка километра: голосом (музыка приглушается) или сигналом. */
+    private fun announceKm(cue: RunTracker.KmCue) {
+        val mode = ru.streetlift.tracker.timer.TimerPrefs.load(this).runKmCue
+        if (mode == 0) return
+        val t = tts
+        if (mode == 2 && t != null && ttsReady) {
+            val am = getSystemService(android.media.AudioManager::class.java)
+            val req = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                .setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build(),
+                ).build()
+            am.requestAudioFocus(req)
+            focus = req
+            t.speak(kmPhrase(cue), android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "km${cue.km}")
+        } else {
+            ru.streetlift.tracker.timer.Beeper.pip()
+            scope.launch {
+                delay(300)
+                ru.streetlift.tracker.timer.Beeper.pip()
+            }
+            ru.streetlift.tracker.timer.SignalPlayer.vibrate(this, 400)
+        }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        initTts()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -69,6 +156,7 @@ class RunService : Service() {
             return START_NOT_STICKY
         }
         startLocation()
+        startBaro()
         if (ticker == null) {
             ticker = scope.launch {
                 if (RunTracker.state.value.phase == RunTracker.Phase.COUNTDOWN) {
@@ -83,6 +171,7 @@ class RunService : Service() {
                     delay(1000)
                     // Отсчёт закончился — свисток, бег пошёл
                     if (RunTracker.tickCountdown()) ru.streetlift.tracker.timer.Beeper.whistle()
+                    if (ru.streetlift.tracker.timer.TimerPrefs.load(this@RunService).runAutoPause) RunTracker.checkAutoPause()
                 }
             }
         }
@@ -126,10 +215,14 @@ class RunService : Service() {
                 when {
                     s.phase == RunTracker.Phase.COUNTDOWN -> "Бег · старт через ${s.countdown}"
                     s.running -> "Бег · $time"
+                    s.autoPaused -> "Бег · $time · автопауза"
                     else -> "Бег · $time · пауза"
                 },
             )
-            .setContentText(if (s.hasFix) "Маршрут записывается" else "Поиск GPS…")
+            .setContentText(
+                if (!s.hasFix) "Поиск GPS…"
+                else "${ru.streetlift.tracker.domain.RunStats.distance(s.distanceM)} · темп ${ru.streetlift.tracker.domain.RunStats.pace(s.avgPace() ?: 0.0)}/км",
+            )
             .setColor(0xFF2196F3.toInt())
             .setColorized(true)
             .setOngoing(true)
@@ -152,11 +245,35 @@ class RunService : Service() {
 
     override fun onDestroy() {
         if (listening) runCatching { getSystemService(LocationManager::class.java).removeUpdates(listener) }
+        if (baroOn) runCatching { getSystemService(android.hardware.SensorManager::class.java).unregisterListener(baroListener) }
+        releaseFocus()
+        runCatching { tts?.shutdown() }
+        tts = null
         scope.cancel()
         super.onDestroy()
     }
 
     companion object {
+        /** «13-й километр. Темп последнего километра — 4 минуты 30 секунд. Средний темп — 5 минут 12 секунд». */
+        fun kmPhrase(cue: RunTracker.KmCue): String {
+            val avg = cue.totalMs / 1000.0 / cue.km
+            return "${cue.km}-й километр. Темп последнего километра — ${spoken(cue.kmMs / 1000.0)}. Средний темп — ${spoken(avg)}."
+        }
+
+        private fun spoken(secPerKm: Double): String {
+            val s = kotlin.math.round(secPerKm).toInt()
+            val m = s / 60
+            val sec = s % 60
+            fun pl(n: Int, one: String, few: String, many: String) = when {
+                n % 100 in 11..14 -> many
+                n % 10 == 1 -> one
+                n % 10 in 2..4 -> few
+                else -> many
+            }
+            val mins = "$m ${pl(m, "минута", "минуты", "минут")}"
+            return if (sec == 0) mins else "$mins $sec ${pl(sec, "секунда", "секунды", "секунд")}"
+        }
+
         const val CHANNEL = "run"
         private const val NOTIF_ID = 3001
         const val ACTION_TOGGLE = "ru.streetlift.tracker.RUN_TOGGLE"

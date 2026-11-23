@@ -565,17 +565,33 @@ private fun LineChart(points: List<Records.Point>, unit: String, pickedDay: Long
 
 private val runDateFmt = DateTimeFormatter.ofPattern("dd.MM.yyyy, HH:mm")
 
-private fun duration(ms: Long): String {
-    val s = (ms / 1000).toInt()
-    return if (s >= 3600) String.format(java.util.Locale.US, "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60) else Fmt.clock(s)
+private fun runDate(r: RunEntity) = Instant.ofEpochMilli(r.startedAt).atZone(ZoneId.systemDefault()).format(runDateFmt)
+
+/** Разобранная пробежка: трек и сводка. */
+private class RunInfo(val run: RunEntity) {
+    val segments = RunTracker.decode(run.route)
+    val track = ru.streetlift.tracker.domain.RunStats.track(RunTracker.toStats(segments))
+    val summary = ru.streetlift.tracker.domain.RunStats.summary(track, run.durationMs)
 }
+
+/** Дистанции личных рекордов. */
+private val PR_DISTANCES = listOf(1000.0 to "1 км", 3000.0 to "3 км", 5000.0 to "5 км", 10_000.0 to "10 км", 21_097.5 to "Полумарафон")
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RunsTab(ui: StatsUi, vm: StatsViewModel) {
-    var open by remember { mutableStateOf<RunEntity?>(null) }
+    var open by remember { mutableStateOf<RunInfo?>(null) }
     var toDelete by remember { mutableStateOf<RunEntity?>(null) }
-    if (ui.runs.isEmpty()) {
+    val infos = remember(ui.runs) { ui.runs.map { RunInfo(it) } }
+    // Личные рекорды: лучший отрезок нужной длины в любом месте любой пробежки
+    val records = remember(infos) {
+        PR_DISTANCES.mapNotNull { (d, label) ->
+            infos.mapNotNull { info -> ru.streetlift.tracker.domain.RunStats.best(info.track, d)?.let { Triple(info, it.first, it.second) } }
+                .minByOrNull { it.second }
+                ?.let { Triple(label, it, d) }
+        }
+    }
+    if (infos.isEmpty()) {
         Text(
             "Пробежек пока нет. Запись — во вкладке «Таймер» → «Бег».",
             Modifier.padding(16.dp),
@@ -583,47 +599,290 @@ private fun RunsTab(ui: StatsUi, vm: StatsViewModel) {
         )
     }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(ui.runs, key = { it.id }) { r ->
-            Card(
-                Modifier.fillMaxWidth().combinedClickable(onClick = { open = r }, onLongClick = { toDelete = r }),
-            ) {
-                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        Instant.ofEpochMilli(r.startedAt).atZone(ZoneId.systemDefault()).format(runDateFmt),
-                        Modifier.weight(1f),
-                    )
-                    Text(duration(r.durationMs), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                }
-            }
-        }
-    }
-    open?.let { r ->
-        Dialog(onDismissRequest = { open = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            Card(Modifier.fillMaxWidth().padding(12.dp)) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        Instant.ofEpochMilli(r.startedAt).atZone(ZoneId.systemDefault()).format(runDateFmt),
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    val segs = remember(r.id) { RunTracker.decode(r.route) }
-                    if (segs.isEmpty()) {
-                        Text("Маршрут не записан (не было GPS)", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    } else {
-                        RouteMap(segs, Modifier.fillMaxWidth().height(420.dp), interactive = true)
+        if (records.isNotEmpty()) {
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Личные рекорды", style = MaterialTheme.typography.titleMedium)
+                        records.forEach { (label, rec, d) ->
+                            val (info, ms, from) = rec
+                            Row(
+                                Modifier.fillMaxWidth().combinedClickable(onClick = { open = info }),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(label, Modifier.weight(1f))
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        "${ru.streetlift.tracker.domain.RunStats.time(ms)} · ${ru.streetlift.tracker.domain.RunStats.pace(ms / 1000.0 / (d / 1000))}/км",
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    Text(
+                                        "${day(Instant.ofEpochMilli(info.run.startedAt).atZone(ZoneId.systemDefault()).toLocalDate().toEpochDay())} · " +
+                                            "с ${ru.streetlift.tracker.domain.RunStats.distance(from)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
                     }
-                    Text("Время: ${duration(r.durationMs)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    TextButton(onClick = { open = null }, modifier = Modifier.align(Alignment.End)) { Text("Закрыть") }
+                }
+            }
+        }
+        items(infos, key = { it.run.id }) { info ->
+            val sm = info.summary
+            Card(
+                Modifier.fillMaxWidth().combinedClickable(onClick = { open = info }, onLongClick = { toDelete = info.run }),
+            ) {
+                Column(Modifier.padding(14.dp)) {
+                    Text(runDate(info.run), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (sm.distanceM > 0) ru.streetlift.tracker.domain.RunStats.distance(sm.distanceM) else "—",
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(ru.streetlift.tracker.domain.RunStats.time(info.run.durationMs), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "${ru.streetlift.tracker.domain.RunStats.pace(sm.pace)}/км",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
             }
         }
     }
+    open?.let { info -> RunDetail(info) { open = null } }
     toDelete?.let { r ->
         AlertDialog(
             onDismissRequest = { toDelete = null },
             title = { Text("Удалить пробежку?") },
-            text = { Text(Instant.ofEpochMilli(r.startedAt).atZone(ZoneId.systemDefault()).format(runDateFmt) + " · " + duration(r.durationMs)) },
+            text = { Text(runDate(r) + " · " + ru.streetlift.tracker.domain.RunStats.time(r.durationMs)) },
             confirmButton = { TextButton(onClick = { vm.deleteRun(r.id); toDelete = null }) { Text("Удалить") } },
             dismissButton = { TextButton(onClick = { toDelete = null }) { Text("Отмена") } },
+        )
+    }
+}
+
+/** Пробежка подробно: карта по темпу, сводка, раскладка, графики темпа и высоты. */
+@Composable
+private fun RunDetail(info: RunInfo, onClose: () -> Unit) {
+    val rs = ru.streetlift.tracker.domain.RunStats
+    val sm = info.summary
+    var step by rememberSaveable { mutableStateOf(1000.0) }
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Card(Modifier.fillMaxSize().padding(8.dp)) {
+            Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(runDate(info.run), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    TextButton(onClick = onClose) { Text("Закрыть") }
+                }
+                if (info.segments.isEmpty()) {
+                    Text("Маршрут не записан (не было GPS)", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    RouteMap(info.segments, Modifier.fillMaxWidth().height(320.dp), interactive = true, paceColors = true)
+                    if (info.track.size >= 2) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("быстрее", color = Color(0xFF4CAF50), style = MaterialTheme.typography.labelSmall)
+                            Text("цвет маршрута — темп", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                            Text("медленнее", color = Color(0xFFF44336), style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+
+                // Сводка
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row {
+                            StatCell("Время", rs.time(info.run.durationMs), Modifier.weight(1f))
+                            StatCell("Дистанция", if (sm.distanceM > 0) rs.distance(sm.distanceM) else "—", Modifier.weight(1f))
+                            StatCell("Темп", "${rs.pace(sm.pace)}/км", Modifier.weight(1f))
+                        }
+                        Row {
+                            StatCell("Скорость", if (sm.speedKmh > 0) String.format(java.util.Locale("ru"), "%.1f км/ч", sm.speedKmh) else "—", Modifier.weight(1f))
+                            StatCell("Набор высоты", sm.gainM?.let { "${it.toInt()} м" } ?: "—", Modifier.weight(1f))
+                            StatCell("Сброс", sm.lossM?.let { "${it.toInt()} м" } ?: "—", Modifier.weight(1f))
+                        }
+                        val bestKm = rs.best(info.track, 1000.0)
+                        if (bestKm != null || sm.minAlt != null) {
+                            Row {
+                                StatCell("Лучший км", bestKm?.let { rs.pace(it.first / 1000.0) } ?: "—", Modifier.weight(1f))
+                                StatCell("Мин. высота", sm.minAlt?.let { "${it.toInt()} м" } ?: "—", Modifier.weight(1f))
+                                StatCell("Макс. высота", sm.maxAlt?.let { "${it.toInt()} м" } ?: "—", Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+
+                if (info.track.size < 2) {
+                    Text(
+                        "Подробная статистика есть только у пробежек, записанных в новой версии.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    // Раскладка
+                    Text("Раскладка", style = MaterialTheme.typography.titleMedium)
+                    ChipRow(listOf("250 м", "500 м", "1 км", "5 км"), when (step) {
+                        250.0 -> "250 м"
+                        500.0 -> "500 м"
+                        5000.0 -> "5 км"
+                        else -> "1 км"
+                    }) { t -> step = when (t) { "250 м" -> 250.0; "500 м" -> 500.0; "5 км" -> 5000.0; else -> 1000.0 } }
+                    val splits = rs.splits(info.track, step)
+                    if (splits.isEmpty()) {
+                        Text("Пробежка короче отрезка", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        val fastest = splits.filter { it.lengthM >= step * 0.99 }.minByOrNull { it.pace }
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(vertical = 6.dp)) {
+                                Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                                    Text("Отрезок", Modifier.weight(1.3f), style = MaterialTheme.typography.labelMedium)
+                                    Text("Время", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
+                                    Text("Темп", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
+                                    Text("± к ср.", Modifier.weight(0.9f), style = MaterialTheme.typography.labelMedium)
+                                }
+                                splits.forEach { sp ->
+                                    HorizontalDivider()
+                                    val diff = sp.pace - sm.pace
+                                    Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            if (sp.lengthM < step * 0.99) "${sp.index} (${rs.distance(sp.lengthM)})" else "${sp.index}",
+                                            Modifier.weight(1.3f),
+                                            fontWeight = if (sp == fastest) FontWeight.Bold else FontWeight.Normal,
+                                        )
+                                        Text(rs.time(sp.timeMs), Modifier.weight(1f))
+                                        Text(
+                                            rs.pace(sp.pace),
+                                            Modifier.weight(1f),
+                                            fontWeight = if (sp == fastest) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (sp == fastest) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                                        )
+                                        Text(
+                                            (if (diff <= 0) "−" else "+") + rs.pace(kotlin.math.abs(diff)).let { if (it == "—") "0:00" else it },
+                                            Modifier.weight(0.9f),
+                                            color = if (diff <= 0) Color(0xFF4CAF50) else ru.streetlift.tracker.ui.theme.WarnOrange,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Графики
+                    val pace = rs.paceSeries(info.track)
+                    if (pace.size >= 2) {
+                        Text("Темп", style = MaterialTheme.typography.titleMedium)
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(12.dp)) {
+                                XYChart(pace, invertY = true, yLabel = { rs.pace(it) }, valueText = { "${rs.pace(it)}/км" })
+                            }
+                        }
+                    }
+                    val alt = rs.altSeries(info.track)
+                    if (alt.size >= 2) {
+                        Text("Высота", style = MaterialTheme.typography.titleMedium)
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(12.dp)) {
+                                XYChart(alt, invertY = false, yLabel = { "${it.toInt()}" }, valueText = { "${it.toInt()} м" })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatCell(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** График по дистанции (x — метры): подписи значений слева, км снизу; нажатие — значение в точке. */
+@Composable
+private fun XYChart(
+    points: List<Pair<Double, Double>>,
+    invertY: Boolean,
+    yLabel: (Double) -> String,
+    valueText: (Double) -> String,
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    val grid = MaterialTheme.colorScheme.outlineVariant
+    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    // Отбрасываем выбросы темпа (старт, остановки), чтобы шкала не растягивалась
+    val ys = points.map { it.second }.sorted()
+    val lo = ys[(ys.size * 0.02).toInt().coerceIn(0, ys.size - 1)]
+    val hi = ys[(ys.size * 0.98).toInt().coerceIn(0, ys.size - 1)]
+    val pad = ((hi - lo) * 0.1).coerceAtLeast(1.0)
+    val minY = lo - pad
+    val maxY = hi + pad
+    val minX = points.first().first
+    val maxX = points.last().first
+    var picked by remember(points) { mutableStateOf<Pair<Double, Double>?>(null) }
+    val h = 220.dp
+    Row {
+        Column(Modifier.height(h).padding(end = 6.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            val top = if (invertY) minY else maxY
+            val bottom = if (invertY) maxY else minY
+            (0..3).forEach { i ->
+                Text(yLabel(top + (bottom - top) * i / 3), style = MaterialTheme.typography.labelSmall, color = labelColor)
+            }
+        }
+        Canvas(
+            Modifier.weight(1f).height(h).pointerInput(points) {
+                detectTapGestures { off ->
+                    val x = minX + (off.x / size.width) * (maxX - minX)
+                    picked = points.minByOrNull { kotlin.math.abs(it.first - x) }
+                }
+            },
+        ) {
+            fun xOf(x: Double) = ((x - minX) / (maxX - minX).coerceAtLeast(1.0) * size.width).toFloat()
+            fun yOf(y: Double): Float {
+                val f = ((y.coerceIn(minY, maxY) - minY) / (maxY - minY)).toFloat()
+                return if (invertY) f * size.height else size.height - f * size.height
+            }
+            (0..3).forEach { i -> val yy = size.height * i / 3; drawLine(grid, Offset(0f, yy), Offset(size.width, yy), 1f) }
+            val path = Path()
+            points.forEachIndexed { i, p -> if (i == 0) path.moveTo(xOf(p.first), yOf(p.second)) else path.lineTo(xOf(p.first), yOf(p.second)) }
+            drawPath(path, primary, style = Stroke(width = 3.dp.toPx()))
+            picked?.let {
+                drawLine(grid, Offset(xOf(it.first), 0f), Offset(xOf(it.first), size.height), 2f)
+                drawCircle(primary, 6.dp.toPx(), Offset(xOf(it.first), yOf(it.second)))
+            }
+        }
+    }
+    Row(Modifier.fillMaxWidth().padding(start = 36.dp, top = 4.dp)) {
+        (0..3).forEach { i ->
+            val x = minX + (maxX - minX) * i / 3
+            Text(
+                String.format(java.util.Locale("ru"), "%.1f км", x / 1000),
+                style = MaterialTheme.typography.labelSmall,
+                color = labelColor,
+                modifier = Modifier.weight(1f),
+                textAlign = when (i) {
+                    0 -> androidx.compose.ui.text.style.TextAlign.Start
+                    3 -> androidx.compose.ui.text.style.TextAlign.End
+                    else -> androidx.compose.ui.text.style.TextAlign.Center
+                },
+            )
+        }
+    }
+    picked?.let {
+        Text(
+            "${String.format(java.util.Locale("ru"), "%.2f км", it.first / 1000)}: ${valueText(it.second)}",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(top = 4.dp),
         )
     }
 }

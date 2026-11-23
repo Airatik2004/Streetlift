@@ -45,7 +45,7 @@ fun RunPanel() {
     val st by RunTracker.state.collectAsStateWithLifecycle()
     var now by remember { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
     LaunchedEffect(st.phase) {
-        while (st.running) {
+        while (st.running || st.autoPaused) {
             now = android.os.SystemClock.elapsedRealtime()
             delay(250)
         }
@@ -116,6 +116,23 @@ fun RunPanel() {
                 fontWeight = FontWeight.Bold,
                 color = if (st.phase == RunTracker.Phase.PAUSED) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
             )
+            if (st.autoPaused) {
+                Text("Автопауза — побегите, и время пойдёт", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
+            }
+            // Дистанция, темп сейчас, средний темп
+            Row(Modifier.fillMaxWidth()) {
+                Metric("Дистанция", ru.streetlift.tracker.domain.RunStats.distance(st.distanceM), Modifier.weight(1f))
+                Metric("Темп сейчас", ru.streetlift.tracker.domain.RunStats.pace(st.currentPace() ?: 0.0), Modifier.weight(1f))
+                Metric("Средний", ru.streetlift.tracker.domain.RunStats.pace(st.avgPace(now) ?: 0.0), Modifier.weight(1f))
+            }
+            if (st.active) {
+                Text(
+                    "Км ${(st.lastKm?.km ?: 0) + 1} · ${ru.streetlift.tracker.domain.RunStats.pace(st.kmPace(now) ?: 0.0)}/км" +
+                        (st.lastKm?.let { " · прошлый ${ru.streetlift.tracker.domain.RunStats.pace(it.kmMs / 1000.0)}" } ?: ""),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         when (st.phase) {
             RunTracker.Phase.IDLE -> Button(
@@ -169,6 +186,27 @@ fun RunPanel() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        // Автопауза и отсечка километров
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text("Автопауза, когда стоите", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            androidx.compose.material3.Switch(checked = prefs.runAutoPause, onCheckedChange = {
+                prefs = prefs.copy(runAutoPause = it)
+                ru.streetlift.tracker.timer.TimerPrefs.save(ctx, prefs)
+            })
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+            Text("Каждый км", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            listOf(0 to "Выкл", 1 to "Сигнал", 2 to "Голос").forEach { (v, t) ->
+                androidx.compose.material3.FilterChip(
+                    selected = prefs.runKmCue == v,
+                    onClick = {
+                        prefs = prefs.copy(runKmCue = v)
+                        ru.streetlift.tracker.timer.TimerPrefs.save(ctx, prefs)
+                    },
+                    label = { Text(t) },
+                )
+            }
+        }
         // Обратный отсчёт перед стартом
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
             Text("Отсчёт", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
@@ -191,5 +229,13 @@ private fun Problem(text: String, action: String, onClick: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         androidx.compose.material3.TextButton(onClick = onClick) { Text(action) }
+    }
+}
+
+@Composable
+private fun Metric(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

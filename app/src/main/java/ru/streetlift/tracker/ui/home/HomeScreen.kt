@@ -499,7 +499,7 @@ private fun PeakDialog(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 OutlinedButton(onClick = { picking = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Дата старта: " + LocalDate.ofEpochDay(day).format(peakDateFmt))
+                    Text("Дата: " + LocalDate.ofEpochDay(day).format(peakDateFmt))
                 }
                 androidx.compose.material3.OutlinedTextField(
                     value = bw,

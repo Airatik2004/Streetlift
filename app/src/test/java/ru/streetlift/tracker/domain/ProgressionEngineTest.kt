@@ -225,6 +225,18 @@ class ProgressionEngineTest {
         assertEquals("2:30", Fmt.clock(150))
     }
 
+    @Test
+    fun fewerSetsByChoice_holdsVolumeAndCountsAsDecline() {
+        var state = PlanState(weightKg = 0f, plannedSets = 4, targetReps = 6, roundsAtWeight = 2)
+        var r = ProgressionEngine.computeNext(heavy, state, sets(0f, 7 to 2, 7 to 2, 7 to 2), false)
+        assertEquals(3, r.state.plannedSets)
+        assertEquals(1, r.state.declineStreak)
+        assertFalse(r.emergencyDeloadScheduled)
+        state = r.state.copy(plannedSets = 4)
+        r = ProgressionEngine.computeNext(heavy, state, sets(0f, 7 to 2, 7 to 2), false)
+        assertTrue(r.emergencyDeloadScheduled) // 2 круга подряд — внеплановая разгрузка
+    }
+
     // ---------------- Калибровка и стадии рычага ----------------
 
     @Test

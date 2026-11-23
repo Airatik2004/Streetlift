@@ -1,6 +1,10 @@
 package ru.streetlift.tracker.ui.workout
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,22 +14,23 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -34,12 +39,11 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -48,10 +52,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -60,6 +69,7 @@ import ru.streetlift.tracker.data.db.SetLogEntity
 import ru.streetlift.tracker.data.repo.WorkoutRepository
 import ru.streetlift.tracker.domain.Fmt
 import ru.streetlift.tracker.domain.ProgressionEngine
+import ru.streetlift.tracker.timer.RestTimer
 import ru.streetlift.tracker.timer.TimerActions
 import ru.streetlift.tracker.ui.common.ConfirmDialog
 import ru.streetlift.tracker.ui.common.StagePicker
@@ -68,10 +78,14 @@ import ru.streetlift.tracker.ui.common.Tag
 import ru.streetlift.tracker.ui.common.TextInputDialog
 import ru.streetlift.tracker.ui.common.parseSignedFloat
 import ru.streetlift.tracker.ui.theme.DeloadGreen
+import ru.streetlift.tracker.ui.theme.TimerDigits
 import ru.streetlift.tracker.ui.theme.WarnOrange
-import ru.streetlift.tracker.ui.timer.RestTimerPanel
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Экран тренировки — «плеер» по шагам, как у интервальных таймеров:
+ * подход → отдых → подход… Внизу всегда ⏮ Предыдущий · ⏯ Пауза · ⏭ Следующий.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) {
     val vm: WorkoutViewModel = viewModel(
@@ -79,6 +93,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
         factory = viewModelFactory { initializer { WorkoutViewModel(repo, sessionId) } },
     )
     val ui by vm.ui.collectAsStateWithLifecycle()
+    val timer by RestTimer.state.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
 
     var menu by remember { mutableStateOf(false) }
@@ -89,14 +104,13 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
 
     BackHandler { onExit() }
 
-    // Уведомление таймера: что дальше и сколько подходов сделано
-    androidx.compose.runtime.LaunchedEffect(ui.stepKey, ui.doneSets, ui.plannedSets) {
+    // Подписи для уведомления таймера
+    LaunchedEffect(ui.stepKey, ui.doneSets, ui.plannedSets) {
         val cur = ui.current
         val next = if (cur == null) "Все подходы сделаны" else {
-            val n = ui.currentSetNumber
-            "Дальше: ${cur.exercise.name} · подход $n из ${maxOf(cur.plannedCount, n)}"
+            "Дальше: ${cur.exercise.name} · подход ${ui.currentSetNumber} из ${cur.plannedCount}"
         }
-        ru.streetlift.tracker.timer.RestTimer.setInfo(next, "подходов ${ui.doneSets}/${ui.plannedSets}")
+        RestTimer.setInfo(next, "подходов ${ui.doneSets}/${ui.plannedSets}")
     }
 
     if (ui.missing) {
@@ -107,6 +121,16 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
         return
     }
     if (!ui.loaded) return
+
+    // Черновик ввода текущего подхода (сбрасывается при смене подхода)
+    var weight by remember(ui.stepKey) { mutableFloatStateOf(ui.defaultWeight) }
+    var reps by remember(ui.stepKey) { mutableIntStateOf(ui.defaultReps) }
+    var rir by remember(ui.stepKey) { mutableIntStateOf(ui.defaultRir) }
+
+    val listState = rememberLazyListState()
+    LaunchedEffect(ui.currentRow, ui.rows.size) {
+        if (ui.rows.isNotEmpty()) listState.animateScrollToItem((ui.currentRow - 1).coerceAtLeast(0))
+    }
 
     Column(Modifier.fillMaxSize()) {
         // --- Шапка ---
@@ -127,91 +151,105 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
             Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Меню") }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Отменить тренировку") },
-                        onClick = {
-                            menu = false
-                            confirmDiscard = true
-                        },
-                    )
+                    DropdownMenuItem(text = { Text("Завершить тренировку") }, onClick = {
+                        menu = false
+                        confirmFinish = true
+                    })
+                    DropdownMenuItem(text = { Text("Отменить тренировку") }, onClick = {
+                        menu = false
+                        confirmDiscard = true
+                    })
                 }
             }
         }
 
-        // --- Таймер ---
-        Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)) {
-            RestTimerPanel(
-                recommendation = ui.recommendation,
-                compact = true,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-            )
-        }
-
-        LazyColumn(
-            Modifier.weight(1f),
-            contentPadding = PaddingValues(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            if (ui.canAlternate) {
-                item {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Чередующиеся подходы", style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                if (ui.alternating) "А1 → отдых → Б1 → отдых → А2…" else "Последовательно: все подходы А, потом Б",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(checked = ui.alternating, onCheckedChange = { vm.setAlternating(it) })
-                    }
-                }
-            }
-
-            item {
-                val cur = ui.current
-                if (cur == null) {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                        Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Все запланированные подходы сделаны 💪", style = MaterialTheme.typography.titleMedium)
-                            Text("Завершите тренировку — план на следующий круг пересчитается автоматически.")
+        // --- Текущий шаг ---
+        val cur = ui.current
+        Surface(color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                when {
+                    cur == null -> {
+                        Text("Все подходы сделаны 💪", style = MaterialTheme.typography.titleLarge)
+                        Spacer(Modifier.height(10.dp))
+                        Button(onClick = { confirmFinish = true }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Завершить тренировку")
                         }
                     }
-                } else {
-                    CurrentSetCard(
+                    ui.resting -> RestPanel(timer, ui)
+                    else -> WorkPanel(
                         ui = ui,
-                        onLog = { w, r, rir ->
-                            vm.logSet(w, r, rir) { rec ->
-                                TimerActions.start(ctx, rec.seconds * 1000L)
-                            }
-                        },
-                        onSkip = { vm.skipCurrent() },
-                        onExtra = { vm.addExtraSet(cur.exercise.id) },
+                        weight = weight, reps = reps, rir = rir,
+                        onWeight = { weight = it }, onReps = { reps = it }, onRir = { rir = it },
+                        onSets = { vm.changeSets(cur.exercise.id, it) },
                         onStage = { vm.setStage(cur.exercise.id, it) },
                         onAddStage = { vm.addStage(it) },
                     )
                 }
             }
+        }
 
-            items(ui.blocks, key = { it.exercise.id }) { b ->
-                ExerciseBlockCard(
-                    block = b,
-                    isCurrent = ui.current?.exercise?.id == b.exercise.id,
-                    onFocus = { vm.focus(b.exercise.id) },
-                    onExtra = { vm.addExtraSet(b.exercise.id) },
-                    onRemoveSet = { vm.removeSet(b.exercise.id) },
-                    onDeleteLog = { logToDelete = it },
-                )
+        // --- Список шагов ---
+        LazyColumn(Modifier.weight(1f), state = listState, contentPadding = PaddingValues(vertical = 4.dp)) {
+            itemsIndexed(ui.rows) { i, row ->
+                val isCurrent = i == ui.currentRow && cur != null
+                val bg = if (isCurrent) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.background
+                when (row) {
+                    is StepRow.Rest -> Text(
+                        "Отдых ${Fmt.clock(row.seconds)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().background(bg).padding(vertical = 4.dp),
+                    )
+                    is StepRow.Work -> {
+                        val log = row.log
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .background(bg)
+                                .combinedClickable(onClick = {}, onLongClick = { if (log != null) logToDelete = log })
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "${row.block.exercise.name} · ${row.setNumber}",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (log != null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (log != null) {
+                                Text(
+                                    "${Fmt.weight(log.weightKg).removeSuffix(" кг")} × ${log.reps} · ${Fmt.rirValue(log.rir)} ✓",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = DeloadGreen,
+                                )
+                            }
+                        }
+                    }
+                }
             }
+        }
+        HorizontalDivider()
 
-            item {
-                Button(
-                    onClick = { confirmFinish = true },
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                ) {
-                    Icon(Icons.Filled.Check, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Завершить тренировку")
+        // --- ⏮ ⏯ ⏭ ---
+        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+            PlayerButton(Icons.Filled.SkipPrevious, "Предыдущий", enabled = ui.canUndo) {
+                if (ui.resting) TimerActions.reset()
+                vm.undoLast()
+            }
+            PlayerButton(
+                if (ui.resting && timer.running) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                if (ui.resting && timer.running) "Пауза" else "Продолжить",
+                enabled = ui.resting,
+            ) { TimerActions.toggle(ctx) }
+            PlayerButton(Icons.Filled.SkipNext, "Следующий", enabled = cur != null) {
+                if (ui.resting) {
+                    TimerActions.reset() // отдых закончен досрочно
+                } else {
+                    vm.logSet(weight, reps, rir) { rec ->
+                        TimerActions.start(ctx, rec.seconds * 1000L, owner = vm.owner)
+                    }
                 }
             }
         }
@@ -222,7 +260,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
         ConfirmDialog(
             title = "Завершить тренировку?",
             text = if (left > 0) {
-                "Осталось подходов: $left. Несделанные подходы засчитаются как невыполненные, и прогрессия веса не сработает."
+                "Осталось подходов: $left. Подходов меньше плана — вес не вырастет, и это засчитается как утомление."
             } else {
                 "План на следующий круг будет пересчитан."
             },
@@ -231,7 +269,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
             onConfirm = {
                 confirmFinish = false
                 TimerActions.reset()
-                ru.streetlift.tracker.timer.RestTimer.setInfo("", "")
+                RestTimer.setInfo("", "")
                 vm.finish { summary = it.ifBlank { "Тренировка сохранена." } }
             },
         )
@@ -244,8 +282,8 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
             onDismiss = { confirmDiscard = false },
             onConfirm = {
                 confirmDiscard = false
-                TimerActions.reset() // отдых больше не нужен
-                ru.streetlift.tracker.timer.RestTimer.setInfo("", "")
+                TimerActions.reset()
+                RestTimer.setInfo("", "")
                 vm.discard(onExit)
             },
         )
@@ -253,7 +291,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
     logToDelete?.let { log ->
         ConfirmDialog(
             title = "Удалить подход?",
-            text = "${log.exerciseName}: ${Fmt.weight(log.weightKg)} × ${log.reps}, ${Fmt.rir(log.rir, log.rir)}",
+            text = "${log.exerciseName}: ${Fmt.weight(log.weightKg)} × ${log.reps}, RIR ${Fmt.rirValue(log.rir)}",
             confirm = "Удалить",
             onDismiss = { logToDelete = null },
             onConfirm = {
@@ -277,22 +315,65 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
     }
 }
 
+@Composable
+private fun PlayerButton(icon: ImageVector, label: String, enabled: Boolean, onClick: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(56.dp)) {
+            Icon(icon, contentDescription = label, modifier = Modifier.size(40.dp))
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+        )
+    }
+}
+
+/** Шаг «Отдых»: крупные цифры, полоса, что дальше. */
+@Composable
+private fun RestPanel(timer: RestTimer.State, ui: WorkoutUi) {
+    val cur = ui.current ?: return
+    val track = MaterialTheme.colorScheme.surfaceVariant
+    val bar = MaterialTheme.colorScheme.primary
+    Text(if (timer.running) "Отдых" else "Отдых · пауза", style = MaterialTheme.typography.titleMedium)
+    Text(Fmt.clock(timer.remainingSeconds), style = TimerDigits.copy(fontSize = 88.sp))
+    Canvas(Modifier.fillMaxWidth().height(6.dp)) {
+        val r = CornerRadius(size.height / 2, size.height / 2)
+        drawRoundRect(track, cornerRadius = r)
+        drawRoundRect(bar, size = Size(size.width * (1f - timer.progress), size.height), cornerRadius = r)
+    }
+    Spacer(Modifier.height(10.dp))
+    Text(
+        "Дальше: ${cur.exercise.name} · подход ${ui.currentSetNumber} из ${cur.plannedCount}",
+        style = MaterialTheme.typography.bodyLarge,
+        textAlign = TextAlign.Center,
+    )
+    Text(
+        if (cur.plan.isCalibration) "Калибровка · ${Fmt.range(cur.plan.repsMin, cur.plan.repsMax)} повт. · RIR ${cur.plan.rirMin}"
+        else "${Fmt.weight(cur.plan.weightKg)} · ${Fmt.range(cur.plan.repsMin, cur.plan.repsMax)} повт. · ${Fmt.rir(cur.plan.rirMin, cur.plan.rirMax)}",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/** Шаг «Подход»: что делать и ввод результата. Записывает кнопка ⏭. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CurrentSetCard(
+private fun WorkPanel(
     ui: WorkoutUi,
-    onLog: (Float, Int, Int) -> Unit,
-    onSkip: () -> Unit,
-    onExtra: () -> Unit,
+    weight: Float,
+    reps: Int,
+    rir: Int,
+    onWeight: (Float) -> Unit,
+    onReps: (Int) -> Unit,
+    onRir: (Int) -> Unit,
+    onSets: (Int) -> Unit,
     onStage: (String?) -> Unit,
     onAddStage: (String) -> Unit,
 ) {
     val cur = ui.current ?: return
     val plan = cur.plan
     val step = cur.exercise.weightStep
-    var weight by remember(ui.stepKey) { mutableFloatStateOf(ui.defaultWeight) }
-    var reps by remember(ui.stepKey) { mutableIntStateOf(ui.defaultReps) }
-    var rir by remember(ui.stepKey) { mutableIntStateOf(ui.defaultRir) }
     var editWeight by remember { mutableStateOf(false) }
     var editReps by remember { mutableStateOf(false) }
 
@@ -304,7 +385,7 @@ private fun CurrentSetCard(
             hint = "Положительный — отягощение, 0 — свой вес, отрицательный — резина",
             onDismiss = { editWeight = false },
             onConfirm = { t ->
-                parseSignedFloat(t)?.let { weight = ProgressionEngine.roundWeight(it) }
+                parseSignedFloat(t)?.let { onWeight(ProgressionEngine.roundWeight(it)) }
                 editWeight = false
             },
         )
@@ -316,170 +397,70 @@ private fun CurrentSetCard(
             keyboardType = KeyboardType.Number,
             onDismiss = { editReps = false },
             onConfirm = { t ->
-                t.trim().toIntOrNull()?.let { reps = it.coerceIn(0, 200) }
+                t.trim().toIntOrNull()?.let { onReps(it.coerceIn(0, 200)) }
                 editReps = false
             },
         )
     }
 
-    val extraSet = ui.currentSetNumber > cur.plannedCount
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column {
-                Text(
-                    if (extraSet) "Доп. подход ${ui.currentSetNumber}" else "Подход ${ui.currentSetNumber} из ${cur.plannedCount}",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Text(cur.exercise.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                if (plan.isCalibration) {
-                    Spacer(Modifier.size(4.dp))
-                    Tag("Калибровка", MaterialTheme.colorScheme.secondary)
-                    Text(
-                        "Коридор: ${Fmt.range(plan.repsMin, plan.repsMax)} повт. · RIR ${plan.rirMin}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        "Подберите вес/стадию под этот диапазон с запасом ${plan.rirMin} повторения " +
-                            "и запишите ${plan.sets} рабочих подхода. Вес можно менять перед каждым подходом — " +
-                            "стартовыми станут параметры последнего подхода.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                } else {
-                    Text(
-                        "План: ${Fmt.weight(plan.weightKg)} · ${Fmt.range(plan.repsMin, plan.repsMax)} повт. (цель ${plan.targetReps}+) · ${Fmt.rir(plan.rirMin, plan.rirMax)}",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    ui.currentStage?.let {
-                        Text("Стадия: $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-                    }
-                }
-                if (plan.isEmergencyDeload) {
-                    Spacer(Modifier.size(4.dp))
-                    Tag("Аварийная разгрузка упражнения", WarnOrange)
-                }
-            }
+    Text(cur.exercise.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+    // Подход N из M с −/+ в пределах коридора
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = { onSets(-1) }, enabled = cur.plannedCount > cur.minCount) { Text("−", fontSize = 20.sp) }
+        Text("Подход ${ui.currentSetNumber} из ${cur.plannedCount}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+        TextButton(onClick = { onSets(1) }, enabled = cur.plannedCount < cur.maxCount) { Text("+", fontSize = 20.sp) }
+    }
+    Text(
+        if (plan.isCalibration) "Калибровка: подберите вес/стадию на ${Fmt.range(plan.repsMin, plan.repsMax)} повт. с запасом ${plan.rirMin}"
+        else "${Fmt.weight(plan.weightKg)} · ${Fmt.range(plan.repsMin, plan.repsMax)} повт. (цель ${plan.targetReps}+) · ${Fmt.rir(plan.rirMin, plan.rirMax)}",
+        style = MaterialTheme.typography.bodyMedium,
+        textAlign = TextAlign.Center,
+    )
+    if (plan.isEmergencyDeload) Tag("Аварийная разгрузка упражнения", WarnOrange)
+    Spacer(Modifier.height(8.dp))
 
-            if (plan.isCalibration && (cur.exercise.leverageStage != null || ui.currentStage != null)) {
-                StagePicker(
-                    stages = ui.stages,
-                    selected = ui.currentStage,
-                    onSelect = onStage,
-                    onAddCustom = onAddStage,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-
-            // Степперы друг под другом — в одну строку на телефоне не помещаются
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Stepper(
-                    label = "Вес (шаг ${Fmt.step(step)})",
-                    value = Fmt.weight(weight).removeSuffix(" кг"),
-                    onMinus = { weight = ProgressionEngine.roundWeight(weight - step) },
-                    onPlus = { weight = ProgressionEngine.roundWeight(weight + step) },
-                    onValueClick = { editWeight = true },
-                )
-                Stepper(
-                    label = "Повторы",
-                    value = reps.toString(),
-                    onMinus = { reps = (reps - 1).coerceAtLeast(0) },
-                    onPlus = { reps += 1 },
-                    onValueClick = { editReps = true },
-                )
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    "Запас (RIR) — сколько чистых повторов оставалось",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    (0..5).forEach { v ->
-                        FilterChip(
-                            selected = rir == v,
-                            onClick = { rir = v },
-                            label = { Text(Fmt.rirValue(v)) },
-                        )
-                    }
-                }
-            }
-
-            Button(onClick = { onLog(weight, reps, rir) }, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Filled.Check, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text("Записать подход")
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onSkip, modifier = Modifier.weight(1f), enabled = !extraSet) {
-                    Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Пропустить")
-                }
-                OutlinedButton(onClick = onExtra, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Подход")
-                }
-            }
+    if (plan.isCalibration && (cur.exercise.leverageStage != null || ui.currentStage != null)) {
+        StagePicker(
+            stages = ui.stages,
+            selected = ui.currentStage,
+            onSelect = onStage,
+            onAddCustom = onAddStage,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+    } else {
+        ui.currentStage?.let {
+            Text("Стадия: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(6.dp))
         }
     }
-}
 
-@Composable
-private fun ExerciseBlockCard(
-    block: ExerciseBlock,
-    isCurrent: Boolean,
-    onFocus: () -> Unit,
-    onExtra: () -> Unit,
-    onRemoveSet: () -> Unit,
-    onDeleteLog: (SetLogEntity) -> Unit,
-) {
-    val plan = block.plan
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(block.exercise.name, style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        (if (plan.isCalibration) "Калибровка · " else "${Fmt.weight(plan.weightKg)} · ") +
-                            "${block.plannedCount} × ${Fmt.range(plan.repsMin, plan.repsMax)} · ${Fmt.rir(plan.rirMin, plan.rirMax)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Text(
-                    "${block.logs.size}/${block.plannedCount}",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = if (block.complete) DeloadGreen else MaterialTheme.colorScheme.onSurface,
-                )
-            }
-            if (block.logs.isNotEmpty()) HorizontalDivider()
-            block.logs.forEachIndexed { i, log ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "${i + 1}.  ${Fmt.weight(log.weightKg)} × ${log.reps}  ·  RIR ${Fmt.rirValue(log.rir)}" +
-                            (log.leverageStage?.let { "  ·  $it" } ?: ""),
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.weight(1f),
-                    )
-                    IconButton(onClick = { onDeleteLog(log) }) {
-                        Icon(Icons.Filled.Close, contentDescription = "Удалить подход", modifier = Modifier.size(18.dp))
-                    }
-                }
-            }
-            if (block.skipped > 0) {
-                Text("Пропущено: ${block.skipped}", style = MaterialTheme.typography.bodySmall, color = WarnOrange)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (!isCurrent) TextButton(onClick = onFocus) { Text("Сделать сейчас") }
-                TextButton(onClick = onRemoveSet, enabled = block.plannedCount > maxOf(block.doneCount, 1)) { Text("− подход") }
-                TextButton(onClick = onExtra) { Text("+ подход") }
-            }
+    Stepper(
+        label = "Вес (шаг ${Fmt.step(step)})",
+        value = Fmt.weight(weight).removeSuffix(" кг"),
+        onMinus = { onWeight(ProgressionEngine.roundWeight(weight - step)) },
+        onPlus = { onWeight(ProgressionEngine.roundWeight(weight + step)) },
+        onValueClick = { editWeight = true },
+    )
+    Spacer(Modifier.height(6.dp))
+    Stepper(
+        label = "Повторы",
+        value = reps.toString(),
+        onMinus = { onReps((reps - 1).coerceAtLeast(0)) },
+        onPlus = { onReps(reps + 1) },
+        onValueClick = { editReps = true },
+    )
+    Spacer(Modifier.height(8.dp))
+    Text("Запас (RIR)", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        (0..5).forEach { v ->
+            FilterChip(selected = rir == v, onClick = { onRir(v) }, label = { Text(Fmt.rirValue(v)) })
         }
     }
+    Text(
+        "⏭ «Следующий» — записать подход и начать отдых",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 6.dp),
+    )
 }

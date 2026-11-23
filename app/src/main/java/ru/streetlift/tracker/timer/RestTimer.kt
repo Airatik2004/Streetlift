@@ -28,6 +28,8 @@ object RestTimer {
         val label: String = "",
         /** Шапка уведомления, напр. «подходов 5/12». */
         val info: String = "",
+        /** Чей это отдых: «session_<id>» — шаг тренировки; пусто — свободный таймер. */
+        val owner: String = "",
     ) {
         val remainingSeconds: Int get() = ((remainingMs + 999) / 1000).toInt()
         val progress: Float get() = if (totalMs <= 0) 0f else (remainingMs.toFloat() / totalMs).coerceIn(0f, 1f)
@@ -43,10 +45,10 @@ object RestTimer {
 
     private fun now() = SystemClock.elapsedRealtime()
 
-    fun start(totalMs: Long = _state.value.totalMs, label: String = _state.value.label) {
+    fun start(totalMs: Long = _state.value.totalMs, label: String = _state.value.label, owner: String = "") {
         val t = totalMs.coerceIn(1_000, 99 * 60_000L)
         endAt = now() + t
-        _state.value = State(totalMs = t, remainingMs = t, running = true, finished = false, label = label, info = _state.value.info)
+        _state.value = State(totalMs = t, remainingMs = t, running = true, finished = false, label = label, info = _state.value.info, owner = owner)
         launchTick()
     }
 
@@ -74,7 +76,7 @@ object RestTimer {
         val s = _state.value
         if (s.running) return
         if (s.remainingMs <= 0 || s.finished) {
-            start(s.totalMs, s.label)
+            start(s.totalMs, s.label, s.owner)
             return
         }
         endAt = now() + s.remainingMs
@@ -89,7 +91,7 @@ object RestTimer {
     fun reset() {
         tickJob?.cancel()
         val s = _state.value
-        _state.value = s.copy(running = false, finished = false, remainingMs = s.totalMs)
+        _state.value = s.copy(running = false, finished = false, remainingMs = s.totalMs, owner = "")
     }
 
     /** ±15 секунд и т.п. Остаток не уходит ниже 1 секунды. */

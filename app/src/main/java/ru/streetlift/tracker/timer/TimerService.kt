@@ -421,8 +421,8 @@ object TimerActions {
     /** Выставить время без запуска (пресеты, рекомендация, ручной ввод). */
     fun set(ms: Long, label: String = RestTimer.state.value.label) = RestTimer.setDuration(ms, label)
 
-    fun start(context: Context, ms: Long, label: String = RestTimer.state.value.label) {
-        RestTimer.start(ms, label)
+    fun start(context: Context, ms: Long, label: String = RestTimer.state.value.label, owner: String = "") {
+        RestTimer.start(ms, label, owner)
         TimerService.ensureRunning(context)
     }
 

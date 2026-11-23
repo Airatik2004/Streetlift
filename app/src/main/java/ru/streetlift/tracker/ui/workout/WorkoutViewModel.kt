@@ -18,18 +18,26 @@ import ru.streetlift.tracker.domain.ProgressionEngine
 import ru.streetlift.tracker.domain.RestRecommendation
 import ru.streetlift.tracker.domain.RestRecommender
 import ru.streetlift.tracker.domain.SessionPlan
+import ru.streetlift.tracker.timer.RestTimer
 import kotlin.math.max
 
 data class ExerciseBlock(
     val exercise: ExerciseEntity,
     val plan: SessionPlan,
     val logs: List<SetLogEntity>,
-    /** Запланировано подходов с учётом добавленных «+ подход». */
+    /** Запланировано подходов с учётом −/+ в пределах коридора. */
     val plannedCount: Int,
-    val skipped: Int,
+    /** Коридор для −/+. */
+    val minCount: Int,
+    val maxCount: Int,
 ) {
-    val doneCount: Int get() = logs.size + skipped
-    val complete: Boolean get() = doneCount >= plannedCount
+    val doneCount: Int get() = logs.size
+}
+
+/** Строка списка шагов: подход (сделанный или будущий) или отдых между подходами. */
+sealed interface StepRow {
+    data class Work(val block: ExerciseBlock, val setNumber: Int, val log: SetLogEntity?) : StepRow
+    data class Rest(val seconds: Int) : StepRow
 }
 
 data class WorkoutUi(
@@ -37,22 +45,25 @@ data class WorkoutUi(
     val missing: Boolean = false,
     val dayName: String = "",
     val isDeload: Boolean = false,
-    val alternating: Boolean = false,
-    val canAlternate: Boolean = false,
     val blocks: List<ExerciseBlock> = emptyList(),
+    /** Текущий подход (null — все сделаны). */
     val current: ExerciseBlock? = null,
     val currentSetNumber: Int = 0,
     val defaultWeight: Float = 0f,
     val defaultReps: Int = 0,
     val defaultRir: Int = 2,
-    val recommendation: RestRecommendation? = null,
     val doneSets: Int = 0,
     val plannedSets: Int = 0,
-    /** Меняется при смене текущего подхода — сбрасывает черновик ввода. */
+    /** Меняется при смене подхода — сбрасывает черновик ввода. */
     val stepKey: String = "",
     val stages: List<StageEntity> = emptyList(),
-    /** Стадия для текущего подхода (в калибровке её можно менять). */
     val currentStage: String? = null,
+    /** Сейчас идёт отдых этой тренировки. */
+    val resting: Boolean = false,
+    val rows: List<StepRow> = emptyList(),
+    /** Индекс текущей строки в [rows] — для подсветки и прокрутки. */
+    val currentRow: Int = 0,
+    val canUndo: Boolean = false,
 )
 
 class WorkoutViewModel(
@@ -64,24 +75,28 @@ class WorkoutViewModel(
         val session: SessionEntity,
         val exercises: List<ExerciseEntity>,
         val plans: Map<Long, SessionPlan>,
-        val autoStart: Boolean,
         val stages: List<StageEntity>,
     )
 
+    private data class Prefill(val weight: Float, val reps: Int, val rir: Int, val stage: String?)
+
     private data class Local(
-        val alternating: Boolean = false,
         val extra: Map<Long, Int> = emptyMap(),
-        val skipped: Map<Long, Int> = emptyMap(),
-        val focusId: Long? = null,
         val missing: Boolean = false,
         val stageDraft: Map<Long, String?> = emptyMap(),
+        /** Значения откатанного подхода — подставляются в ввод. */
+        val prefill: Map<String, Prefill> = emptyMap(),
     )
+
+    val owner = "session_$sessionId"
 
     private val static = MutableStateFlow<Static?>(null)
     private val local = MutableStateFlow(Local())
 
-    val ui: StateFlow<WorkoutUi> = combine(static, repo.observeSets(sessionId), local) { st, logs, loc ->
-        build(st, logs, loc)
+    val ui: StateFlow<WorkoutUi> = combine(
+        static, repo.observeSets(sessionId), local, RestTimer.state,
+    ) { st, logs, loc, timer ->
+        build(st, logs, loc, timer)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WorkoutUi())
 
     init {
@@ -92,75 +107,88 @@ class WorkoutViewModel(
                 return@launch
             }
             val exercises = session.dayId?.let { repo.getExercisesForDay(it) } ?: emptyList()
-            val settings = repo.getSettings()
             val plans = exercises.associate {
                 it.id to ProgressionEngine.sessionPlan(it.toConfig(), it.toState(), session.isDeload)
             }
-            local.update { it.copy(alternating = session.alternating && exercises.size > 1) }
-            static.value = Static(session, exercises, plans, settings.autoStartTimer, repo.getStages())
+            static.value = Static(session, exercises, plans, repo.getStages())
         }
     }
 
-    private fun build(st: Static?, logs: List<SetLogEntity>, loc: Local): WorkoutUi {
+    private fun recommend(b: ExerciseBlock, st: Static): RestRecommendation =
+        RestRecommender.recommend(b.exercise.type, st.session.alternating && st.exercises.size > 1, b.plan.isDeload)
+
+    private fun build(st: Static?, logs: List<SetLogEntity>, loc: Local, timer: RestTimer.State): WorkoutUi {
         if (st == null) return WorkoutUi(missing = loc.missing)
 
         val blocks = st.exercises.map { ex ->
             val plan = st.plans.getValue(ex.id)
+            val exLogs = logs.filter { it.exerciseId == ex.id }.sortedBy { it.loggedAt }
+            val floor = if (plan.isDeload || plan.isCalibration) 1 else max(1, ex.minSets - 1)
+            val minCount = max(floor, exLogs.size)
+            val maxCount = max(max(ex.maxSets, plan.sets), exLogs.size)
             ExerciseBlock(
                 exercise = ex,
                 plan = plan,
-                logs = logs.filter { it.exerciseId == ex.id }.sortedBy { it.setIndex },
-                plannedCount = (plan.sets + (loc.extra[ex.id] ?: 0)).coerceAtLeast(1),
-                skipped = loc.skipped[ex.id] ?: 0,
+                logs = exLogs,
+                plannedCount = (plan.sets + (loc.extra[ex.id] ?: 0)).coerceIn(minCount, maxCount),
+                minCount = minCount,
+                maxCount = maxCount,
             )
         }
-        val alternating = loc.alternating && blocks.size > 1
+        val alternating = st.session.alternating && blocks.size > 1
         val order = buildOrder(blocks, alternating)
         val byId = blocks.associateBy { it.exercise.id }
         val nextPending = order.firstOrNull { (id, n) -> n > (byId[id]?.doneCount ?: 0) }
-        val focus = loc.focusId?.let { byId[it] }
-        val current = focus ?: nextPending?.let { byId[it.first] }
+        val current = nextPending?.let { byId[it.first] }
+        val setNumber = (current?.doneCount ?: 0) + 1
+        val stepKey = "${current?.exercise?.id}_${current?.doneCount}"
+        val resting = timer.owner == owner && (timer.running || (!timer.finished && !timer.idle))
 
-        val lastLog = logs.maxByOrNull { it.loggedAt }
-        val recBlock = lastLog?.exerciseId?.let { byId[it] } ?: current
-        val rec = recBlock?.let {
-            RestRecommender.recommend(it.exercise.type, alternating, it.plan.isDeload)
+        // Список шагов: подходы по порядку, между ними отдых
+        val rows = mutableListOf<StepRow>()
+        var currentRow = 0
+        order.forEachIndexed { i, (id, n) ->
+            val b = byId.getValue(id)
+            if (i > 0) {
+                val prev = byId.getValue(order[i - 1].first)
+                rows += StepRow.Rest(recommend(prev, st).seconds)
+            }
+            if (current != null && id == current.exercise.id && n == setNumber) {
+                currentRow = if (resting && rows.lastOrNull() is StepRow.Rest) rows.size - 1 else rows.size
+            }
+            rows += StepRow.Work(b, n, b.logs.getOrNull(n - 1))
         }
+        if (current == null) currentRow = (rows.size - 1).coerceAtLeast(0)
 
-        val prev = current?.logs?.lastOrNull()
+        val pf = loc.prefill[stepKey]
+        val prevLog = current?.logs?.lastOrNull()
+        val stage = current?.let { b ->
+            when {
+                loc.stageDraft.containsKey(b.exercise.id) -> loc.stageDraft[b.exercise.id]
+                pf != null -> pf.stage
+                else -> prevLog?.leverageStage ?: b.exercise.leverageStage
+            }
+        }
         return WorkoutUi(
             loaded = true,
             dayName = st.session.dayName,
             isDeload = st.session.isDeload,
-            alternating = alternating,
-            canAlternate = blocks.size > 1,
             blocks = blocks,
             current = current,
-            currentSetNumber = (current?.logs?.size ?: 0) + 1,
-            defaultWeight = prev?.weightKg ?: current?.plan?.weightKg ?: 0f,
-            defaultReps = prev?.reps ?: current?.plan?.targetReps ?: 0,
-            defaultRir = prev?.rir ?: current?.plan?.rirMin ?: 2,
-            recommendation = rec,
+            currentSetNumber = setNumber,
+            defaultWeight = pf?.weight ?: prevLog?.weightKg ?: current?.plan?.weightKg ?: 0f,
+            defaultReps = pf?.reps ?: prevLog?.reps ?: current?.plan?.targetReps ?: 0,
+            defaultRir = pf?.rir ?: prevLog?.rir ?: current?.plan?.rirMin ?: 2,
             doneSets = blocks.sumOf { it.doneCount },
-            plannedSets = blocks.sumOf { max(it.plannedCount, it.doneCount) },
-            stepKey = "${current?.exercise?.id}_${current?.logs?.size}_${current?.skipped}",
+            plannedSets = blocks.sumOf { it.plannedCount },
+            stepKey = stepKey,
             stages = st.stages,
-            currentStage = current?.let { stageFor(it, loc) },
+            currentStage = stage,
+            resting = resting && current != null,
+            rows = rows,
+            currentRow = currentRow,
+            canUndo = logs.isNotEmpty(),
         )
-    }
-
-    private fun stageFor(b: ExerciseBlock, loc: Local): String? =
-        if (loc.stageDraft.containsKey(b.exercise.id)) loc.stageDraft[b.exercise.id]
-        else b.logs.lastOrNull()?.leverageStage ?: b.exercise.leverageStage
-
-    /** Выбор стадии во время калибровки. */
-    fun setStage(exerciseId: Long, stage: String?) =
-        local.update { it.copy(stageDraft = it.stageDraft + (exerciseId to stage)) }
-
-    fun addStage(name: String) = viewModelScope.launch {
-        val added = repo.addStage(name)
-        static.update { it?.copy(stages = repo.getStages()) }
-        ui.value.current?.exercise?.id?.let { setStage(it, added) }
     }
 
     /** Последовательно: А1 А2 А3 Б1 Б2… Чередование: А1 Б1 А2 Б2… */
@@ -172,6 +200,7 @@ class WorkoutViewModel(
             (1..maxN).flatMap { n -> blocks.filter { it.plannedCount >= n }.map { it.exercise.id to n } }
         }
 
+    /** «Следующий» на шаге подхода: записать подход и начать отдых. */
     fun logSet(weight: Float, reps: Int, rir: Int, onRest: (RestRecommendation) -> Unit) {
         val u = ui.value
         val block = u.current ?: return
@@ -192,33 +221,37 @@ class WorkoutViewModel(
                     isCalibration = block.plan.isCalibration,
                 ),
             )
-            local.update { it.copy(focusId = null) }
-            val remaining = u.plannedSets - u.doneSets - 1
-            if (st.autoStart && remaining > 0) {
-                onRest(RestRecommender.recommend(block.exercise.type, u.alternating, block.plan.isDeload))
-            }
+            local.update { it.copy(prefill = it.prefill - u.stepKey) }
+            if (u.doneSets + 1 < u.plannedSets) onRest(recommend(block, st))
         }
     }
 
-    fun skipCurrent() {
-        val id = ui.value.current?.exercise?.id ?: return
-        local.update { it.copy(skipped = it.skipped + (id to ((it.skipped[id] ?: 0) + 1)), focusId = null) }
+    /** «Предыдущий»: откатить последний записанный подход и вернуться к нему. */
+    fun undoLast() = viewModelScope.launch {
+        val logs = ui.value.blocks.flatMap { it.logs }
+        val last = logs.maxByOrNull { it.loggedAt } ?: return@launch
+        val key = "${last.exerciseId}_${logs.count { it.exerciseId == last.exerciseId } - 1}"
+        local.update {
+            it.copy(prefill = it.prefill + (key to Prefill(last.weightKg, last.reps, last.rir, last.leverageStage)))
+        }
+        repo.deleteSet(last)
     }
 
-    fun addExtraSet(exerciseId: Long) {
-        local.update { it.copy(extra = it.extra + (exerciseId to ((it.extra[exerciseId] ?: 0) + 1)), focusId = exerciseId) }
-    }
-
-    /** Убрать один запланированный подход (не меньше уже сделанных и не меньше 1). */
-    fun removeSet(exerciseId: Long) {
+    /** −/+ подход для текущего упражнения в пределах коридора. */
+    fun changeSets(exerciseId: Long, delta: Int) {
         val b = ui.value.blocks.firstOrNull { it.exercise.id == exerciseId } ?: return
-        if (b.plannedCount <= maxOf(b.doneCount, 1)) return
-        local.update { it.copy(extra = it.extra + (exerciseId to ((it.extra[exerciseId] ?: 0) - 1))) }
+        val target = (b.plannedCount + delta).coerceIn(b.minCount, b.maxCount)
+        local.update { it.copy(extra = it.extra + (exerciseId to (target - b.plan.sets))) }
     }
 
-    fun focus(exerciseId: Long) = local.update { it.copy(focusId = exerciseId) }
+    fun setStage(exerciseId: Long, stage: String?) =
+        local.update { it.copy(stageDraft = it.stageDraft + (exerciseId to stage)) }
 
-    fun setAlternating(on: Boolean) = local.update { it.copy(alternating = on, focusId = null) }
+    fun addStage(name: String) = viewModelScope.launch {
+        val added = repo.addStage(name)
+        static.update { it?.copy(stages = repo.getStages()) }
+        ui.value.current?.exercise?.id?.let { setStage(it, added) }
+    }
 
     fun deleteLog(log: SetLogEntity) = viewModelScope.launch { repo.deleteSet(log) }
 

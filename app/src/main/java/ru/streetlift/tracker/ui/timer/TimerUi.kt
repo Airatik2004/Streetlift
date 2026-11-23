@@ -150,7 +150,7 @@ private fun ControlsRow(st: RestTimer.State, big: Boolean) {
     val btn = if (big) 64.dp else 48.dp
     val pad = androidx.compose.foundation.layout.PaddingValues(horizontal = if (big) 16.dp else 8.dp, vertical = 0.dp)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (big) 16.dp else 6.dp)) {
-        FilledTonalButton(onClick = { TimerActions.add(-15_000) }, contentPadding = pad) { Text("−15с") }
+        FilledTonalButton(onClick = { TimerActions.add(-10_000) }, contentPadding = pad) { Text("−10с") }
         FilledIconButton(
             onClick = { TimerActions.toggle(ctx) },
             modifier = Modifier.size(btn),
@@ -162,7 +162,7 @@ private fun ControlsRow(st: RestTimer.State, big: Boolean) {
                 modifier = Modifier.size(if (big) 34.dp else 26.dp),
             )
         }
-        FilledTonalButton(onClick = { TimerActions.add(15_000) }, contentPadding = pad) { Text("+15с") }
+        FilledTonalButton(onClick = { TimerActions.add(10_000) }, contentPadding = pad) { Text("+10с") }
         FilledTonalIconButton(onClick = { TimerActions.reset() }) {
             Icon(Icons.Filled.Refresh, contentDescription = "Сброс")
         }

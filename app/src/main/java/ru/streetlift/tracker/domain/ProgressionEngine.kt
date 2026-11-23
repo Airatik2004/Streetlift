@@ -206,7 +206,9 @@ object ProgressionEngine {
         val prevScore = state.lastScore
         val prevWeight = state.lastScoreWeight
         val comparable = prevScore != null && prevWeight != null && abs(prevWeight - work) < 0.001f
-        val declined = comparable && score < prevScore!! - 0.01f
+        // Подходов сделано меньше плана (убраны вручную / не доделаны) — тоже сигнал утомления
+        val reduced = sets.size < planned
+        val declined = (comparable && score < prevScore!! - 0.01f) || reduced
         var streak = if (declined) state.declineStreak + 1 else 0
         var emergency = false
         if (streak >= 2) {
@@ -253,6 +255,7 @@ object ProgressionEngine {
             else -> {
                 val rounds = state.roundsAtWeight + 1
                 val newSets = when {
+                    reduced -> max(max(1, config.minSets - 1), sets.size)
                     planned < config.minSets -> config.minSets
                     avgRir >= config.targetRirMin -> config.maxSets
                     else -> planned
@@ -269,7 +272,9 @@ object ProgressionEngine {
                     lastScoreWeight = work,
                 )
                 decision = if (newSets > planned) Decision.ADD_VOLUME else Decision.HOLD
-                msg = if (decision == Decision.ADD_VOLUME) {
+                msg = if (reduced) {
+                    "подходов меньше плана (${sets.size} из $planned) — объём не растёт, держим ${Fmt.weight(work)}"
+                } else if (decision == Decision.ADD_VOLUME) {
                     "объём ↑ до $newSets подходов, вес ${Fmt.weight(work)}, цель ${newTarget}+ повт."
                 } else {
                     "держим ${Fmt.weight(work)}, $newSets подходов, цель ${newTarget}+ повт."

@@ -83,7 +83,10 @@ object ActiveWorkout {
             val phase = session.peakPhase?.let { runCatching { PeakPhase.valueOf(it) }.getOrNull() } ?: PeakPhase.NONE
             val peakIds = session.peakIds?.split(',')?.mapNotNull { it.trim().toLongOrNull() }?.toSet().orEmpty()
             val plans = all.mapNotNull { e ->
-                Peaking.resolve(e.toConfig(), e.toState(), e.type, phase == PeakPhase.NONE && e.plannedDeload(st.deloadEvery, session.isDeload), phase, e.id in peakIds, bodyWeight)?.let { e.id to it }
+                Peaking.resolve(e.toConfig(), e.toState(), e.type, phase == PeakPhase.NONE && e.plannedDeload(st.deloadEvery, session.isDeload), phase, e.id in peakIds, bodyWeight)
+                    // Первая тренировка подготовки после паузы — на подход меньше
+                    ?.let { if (session.afterPause) it.copy(sets = (it.sets - 1).coerceAtLeast(1)) else it }
+                    ?.let { e.id to it }
             }.toMap()
             val exercises = all.filter { it.id in plans }
             val own = owner(sessionId)

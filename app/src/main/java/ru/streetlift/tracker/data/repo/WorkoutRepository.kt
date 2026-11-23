@@ -65,6 +65,11 @@ class WorkoutRepository(private val db: AppDatabase) {
         if (fixed.isNotEmpty()) programDao.updateExercises(fixed)
     }
 
+    /** Напоминания: накануне и в день тренировки (минуты от полуночи). */
+    suspend fun setReminders(eve: Boolean, eveMin: Int, day: Boolean, dayMin: Int) {
+        settingsDao.upsert(getSettings().copy(remindEve = eve, remindEveMin = eveMin, remindDay = day, remindDayMin = dayMin))
+    }
+
     /** Сохранить набор резин (название + помощь в кг). */
     suspend fun setBands(bands: List<ru.streetlift.tracker.domain.Band>) {
         val clean = bands.filter { it.name.isNotBlank() && it.kg > 0f }
@@ -115,6 +120,8 @@ class WorkoutRepository(private val db: AppDatabase) {
         val s = getSettings()
         val day = programDao.getDay(dayId) ?: error("День не найден")
         val phase = Peaking.phaseOn(s.peakEpochDay, today(), s.peakSpanDays)
+        // Подготовка к пику после паузы ≥ 3 дней — первая тренировка на подход легче
+        val afterPause = phase == PeakPhase.PRE_PEAK && s.missedDays(today()) >= Peaking.PAUSE_DAYS
         sessionDao.insertSession(
             SessionEntity(
                 dayId = day.id,
@@ -127,9 +134,28 @@ class WorkoutRepository(private val db: AppDatabase) {
                 peakPhase = phase.takeIf { it != PeakPhase.NONE }?.name,
                 peakIds = s.peakExerciseIds.takeIf { phase != PeakPhase.NONE },
                 priority = s.priority.name,
+                afterPause = afterPause,
             ),
         )
     }
+
+    /** Начать тренировку запланированного дня (из уведомления «Начать»); идущая — вернуть её. */
+    suspend fun startPlanned(): Long? {
+        sessionDao.getActive()?.let { return it.id }
+        val days = programDao.getDays()
+        val idx = plannedDayIndex(getSettings(), days, programDao.getAllExercises(), sessionDao.getAllSessions(), today())
+        val day = days.getOrNull(idx) ?: return null
+        return startSession(day.id)
+    }
+
+    /** Запланированный день цикла (с учётом выхода на пик) — для напоминаний. */
+    suspend fun plannedDay(): DayEntity? {
+        val days = programDao.getDays()
+        val idx = plannedDayIndex(getSettings(), days, programDao.getAllExercises(), sessionDao.getAllSessions(), today())
+        return days.getOrNull(idx)
+    }
+
+    suspend fun hasActiveSession(): Boolean = sessionDao.getActive() != null
 
     // ---------------- Подводка к старту ----------------
 
@@ -292,6 +318,7 @@ class WorkoutRepository(private val db: AppDatabase) {
                 mesoIndex = if (adv.roundCompleted && adv.state.cycleInMeso == 1) s.mesoIndex + 1 else s.mesoIndex,
                 deloadOverride = adv.state.override,
                 nextWorkoutEpochDay = today() + 2, // через день отдыха
+                manualDay = false,
             ),
         )
         val summary = lines.joinToString("\n")
@@ -313,12 +340,15 @@ class WorkoutRepository(private val db: AppDatabase) {
             undoOverride = s0.deloadOverride.name,
             undoNextEpochDay = s0.nextWorkoutEpochDay,
         )
+        // Пропускается показанный день (на пике он может быть выбран не по порядку)
+        val shown = plannedDayIndex(s0, days, programDao.getAllExercises(), sessionDao.getAllSessions(), today())
         val adv = ProgressionEngine.advanceCycle(
             CycleState(s.currentDayIndex, s.cycleInMeso, s.completedRounds, s.deloadOverride),
-            s.currentDayIndex, days.size, s.deloadEvery,
+            shown, days.size, s.deloadEvery,
         )
         settingsDao.upsert(
             s.copy(
+                manualDay = true,
                 currentDayIndex = adv.state.dayIndex,
                 cycleInMeso = adv.state.cycleInMeso,
                 completedRounds = adv.state.completedRounds,
@@ -335,6 +365,7 @@ class WorkoutRepository(private val db: AppDatabase) {
         if (!s.canUndoSkip) return
         settingsDao.upsert(
             s.withoutUndo().copy(
+                manualDay = false,
                 currentDayIndex = s.undoDayIndex ?: s.currentDayIndex,
                 cycleInMeso = s.undoCycleInMeso ?: s.cycleInMeso,
                 completedRounds = s.undoCompletedRounds ?: s.completedRounds,
@@ -359,7 +390,7 @@ class WorkoutRepository(private val db: AppDatabase) {
 
     suspend fun selectDay(index: Int) {
         val s = getSettings()
-        settingsDao.upsert(s.copy(currentDayIndex = index))
+        settingsDao.upsert(s.copy(currentDayIndex = index, manualDay = true))
     }
 
     /** Сдвинуть следующую тренировку на день позже. */
@@ -598,4 +629,36 @@ class WorkoutRepository(private val db: AppDatabase) {
             )
         }
     }
+}
+
+
+/**
+ * Индекс следующего дня цикла. На выходе на пик — день с пиковым упражнением,
+ * ещё не сделанным в текущей фазе (чтобы пропуски не выбивали пиковые упражнения).
+ */
+fun plannedDayIndex(
+    s: SettingsEntity,
+    days: List<DayEntity>,
+    exs: List<ExerciseEntity>,
+    sessions: List<SessionEntity>,
+    today: Long,
+): Int {
+    if (days.isEmpty()) return 0
+    val base = s.currentDayIndex.coerceIn(0, days.size - 1)
+    if (s.manualDay) return base
+    val peak = s.peakEpochDay ?: return base
+    val phase = Peaking.phaseOn(peak, maxOf(today, s.nextWorkoutEpochDay ?: today), s.peakSpanDays)
+    if (phase == PeakPhase.NONE) return base
+    val zone = java.time.ZoneId.systemDefault()
+    val doneDays = sessions
+        .filter { it.finishedAt != null && it.peakPhase == phase.name }
+        .filter { java.time.Instant.ofEpochMilli(it.startedAt).atZone(zone).toLocalDate().toEpochDay() >= peak - Peaking.FULL_SPAN }
+        .mapNotNull { it.dayId }
+        .toSet()
+    val done = exs.filter { it.dayId in doneDays }.map { it.id }.toSet()
+    val sorted = days.sortedBy { it.position }
+    val perDay = sorted.map { d -> exs.filter { it.dayId == d.id }.map { it.id }.toSet() }
+    val pos = days[base].position
+    val picked = Peaking.pickPeakDay(sorted.indexOfFirst { it.position == pos }.coerceAtLeast(0), perDay, s.peakIds, done)
+    return days.indexOfFirst { it.id == sorted[picked].id }.coerceAtLeast(0)
 }

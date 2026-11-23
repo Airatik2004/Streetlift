@@ -27,6 +27,11 @@ class MainActivity : ComponentActivity() {
             NavRequests.openWorkout.value = id
             intent?.removeExtra(NavRequests.EXTRA_OPEN_SESSION)
         }
+        if (intent?.getBooleanExtra(NavRequests.EXTRA_START_WORKOUT, false) == true) {
+            NavRequests.startWorkout.value = true
+            intent.removeExtra(NavRequests.EXTRA_START_WORKOUT)
+            androidx.core.app.NotificationManagerCompat.from(this).cancel(2001)
+        }
         val tab = intent?.getIntExtra(NavRequests.EXTRA_OPEN_TAB, -1) ?: -1
         if (tab >= 0) {
             NavRequests.openTab.value = tab

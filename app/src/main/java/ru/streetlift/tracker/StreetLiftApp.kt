@@ -21,6 +21,11 @@ class StreetLiftApp : Application() {
         repository = WorkoutRepository(AppDatabase.build(this))
         appScope.launch { repository.ensureSeeded() }
         TimerService.createChannels(this)
+        ru.streetlift.tracker.reminder.Reminders.createChannel(this)
+        // Напоминания переставляются при каждом изменении настроек (тренировка, перенос, время)
+        appScope.launch {
+            repository.settings.collect { ru.streetlift.tracker.reminder.Reminders.reschedule(this@StreetLiftApp, it) }
+        }
         ru.streetlift.tracker.timer.Beeper.init(this)
     }
 }

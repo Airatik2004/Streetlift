@@ -26,6 +26,36 @@ object Peaking {
         else -> PeakPhase.NONE
     }
 
+    /** Пауза (дней после запланированной даты), после которой в подготовке — на подход меньше. */
+    const val PAUSE_DAYS = 3
+
+    /** Сколько дней осталось в текущей фазе (включая сегодня). */
+    fun daysLeftInPhase(daysToStart: Long, span: Int? = null): Long {
+        val low = when (phase(daysToStart, span)) {
+            PeakPhase.REST -> 0L
+            PeakPhase.TONUS -> 3L
+            PeakPhase.TAPER1 -> 8L
+            PeakPhase.PRE_PEAK -> 15L
+            PeakPhase.NONE -> return 0L
+        }
+        return daysToStart - low + 1
+    }
+
+    /**
+     * День цикла для тренировки на пике: первый по порядку от [current] день, где есть пиковое
+     * упражнение, ещё не сделанное в текущей фазе. Иначе — [current].
+     */
+    fun pickPeakDay(current: Int, dayExerciseIds: List<Set<Long>>, targets: Set<Long>, done: Set<Long>): Int {
+        val rest = targets - done
+        val n = dayExerciseIds.size
+        if (rest.isEmpty() || n == 0) return current
+        for (k in 0 until n) {
+            val i = (current + k) % n
+            if (dayExerciseIds[i].any { it in rest }) return i
+        }
+        return current
+    }
+
     /** Фаза на день [dayEpoch] при старте [peakEpochDay] (null — подводка выключена). */
     fun phaseOn(peakEpochDay: Long?, dayEpoch: Long, span: Int? = null): PeakPhase =
         if (peakEpochDay == null) PeakPhase.NONE else phase(peakEpochDay - dayEpoch, span)

@@ -86,24 +86,45 @@ data class HomeUiState(
     val phase: PeakPhase = PeakPhase.NONE,
     val daysToStart: Long? = null,
     val allExercises: List<ExerciseEntity> = emptyList(),
+    /** Пропущено дней после запланированной даты. */
+    val missedDays: Long = 0,
+    /** День выбран не по порядку — чтобы не выпало пиковое упражнение. */
+    val peakDayShifted: Boolean = false,
+    /** Первая тренировка подготовки после паузы — на подход меньше. */
+    val afterPause: Boolean = false,
 )
 
 class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
 
     val state: StateFlow<HomeUiState> = combine(
-        repo.settings, repo.days, repo.exercises, repo.activeSession, repo.lastFinishedSession,
-    ) { s, days, exs, active, last ->
-        val idx = if (days.isEmpty()) 0 else s.currentDayIndex.coerceIn(0, days.size - 1)
-        val day = days.getOrNull(idx)
+        combine(repo.settings, repo.days, repo.exercises, repo.activeSession, repo.lastFinishedSession) { a, b, c, d, e ->
+            listOf(a, b, c, d, e)
+        },
+        repo.finishedSessions,
+    ) { base, finished ->
+        @Suppress("UNCHECKED_CAST")
+        val s = base[0] as SettingsEntity
+        @Suppress("UNCHECKED_CAST")
+        val days = base[1] as List<DayEntity>
+        @Suppress("UNCHECKED_CAST")
+        val exs = base[2] as List<ExerciseEntity>
+        val active = base[3] as SessionEntity?
+        val last = base[4] as SessionEntity?
         val today = LocalDate.now().toEpochDay()
+        val baseIdx = if (days.isEmpty()) 0 else s.currentDayIndex.coerceIn(0, days.size - 1)
+        val idx = ru.streetlift.tracker.data.repo.plannedDayIndex(s, days, exs, finished, today)
+        val day = days.getOrNull(idx)
         val workoutDay = maxOf(today, s.nextWorkoutEpochDay ?: today)
         val phase = Peaking.phaseOn(s.peakEpochDay, workoutDay, s.peakSpanDays)
         val global = s.forcedDeload && phase == PeakPhase.NONE
+        val missed = s.missedDays(today)
+        val afterPause = phase == PeakPhase.PRE_PEAK && missed >= Peaking.PAUSE_DAYS
         val peakIds = s.peakIds
         val previews = if (day == null) emptyList() else ru.streetlift.tracker.domain.ProgramOrder.order(
             day.position, exs.filter { it.dayId == day.id }.sortedBy { it.position }, s.priority,
         )
-            .map { ExercisePreview(it, Peaking.resolve(it.toConfig(), it.toState(), it.type, phase == PeakPhase.NONE && it.plannedDeload(s.deloadEvery, global), phase, it.id in peakIds, s.bodyWeightKg)) }
+            .map { ExercisePreview(it, Peaking.resolve(it.toConfig(), it.toState(), it.type, phase == PeakPhase.NONE && it.plannedDeload(s.deloadEvery, global), phase, it.id in peakIds, s.bodyWeightKg)
+                ?.let { p -> if (afterPause) p.copy(sets = (p.sets - 1).coerceAtLeast(1)) else p }) }
         val dayOrder = days.associate { it.id to it.position }
         HomeUiState(
             loading = false,
@@ -119,6 +140,9 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
             phase = phase,
             daysToStart = s.peakEpochDay?.let { it - today },
             allExercises = exs.sortedWith(compareBy({ dayOrder[it.dayId] ?: 0 }, { it.position })),
+            missedDays = missed,
+            peakDayShifted = idx != baseIdx,
+            afterPause = afterPause,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
@@ -200,6 +224,32 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
                     style = MaterialTheme.typography.bodyLarge,
                     color = if (ui.globalDeload) DeloadGreen else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // Выход на пик: пропуски сокращают фазы — предупреждение, выбор дня, облегчение после паузы
+                if (ui.phase != PeakPhase.NONE) {
+                    val left = ui.daysToStart?.let { Peaking.daysLeftInPhase(it, s.peakSpanDays) } ?: 0L
+                    if (ui.missedDays > 0) {
+                        Text(
+                            "Пропущено ${ui.missedDays} ${plural(ui.missedDays.toInt(), "день", "дня", "дней")} — подготовка сокращена: " +
+                                "на «${ui.phase.title}» осталось $left ${plural(left.toInt(), "день", "дня", "дней")}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = WarnOrange,
+                        )
+                    }
+                    if (ui.peakDayShifted) {
+                        Text(
+                            "День выбран не по порядку — чтобы пиковое упражнение не выпало из фазы",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (ui.afterPause) {
+                        Text(
+                            "После паузы — на подход меньше в каждом упражнении",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         }
 

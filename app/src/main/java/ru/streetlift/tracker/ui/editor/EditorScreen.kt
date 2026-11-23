@@ -76,6 +76,8 @@ class EditorViewModel(private val repo: WorkoutRepository) : ViewModel() {
     fun setDeloadEvery(n: Int) = viewModelScope.launch { repo.setDeloadEvery(n) }
     fun setDeload(want: Boolean) = viewModelScope.launch { repo.setDeload(want) }
     fun setBands(b: List<ru.streetlift.tracker.domain.Band>) = viewModelScope.launch { repo.setBands(b) }
+    fun setReminders(eve: Boolean, eveMin: Int, day: Boolean, dayMin: Int) =
+        viewModelScope.launch { repo.setReminders(eve, eveMin, day, dayMin) }
     fun setPriority(m: ru.streetlift.tracker.domain.PriorityMode) = viewModelScope.launch { repo.setPriorityMode(m) }
     fun setAutoStart(b: Boolean) = viewModelScope.launch { repo.setAutoStartTimer(b) }
     fun resetProgram() = viewModelScope.launch { repo.resetProgram() }
@@ -200,6 +202,8 @@ fun EditorScreen(repo: WorkoutRepository) {
                             onPlus = { vm.setDeloadEvery(s.deloadEvery + 1) },
                         )
                     }
+                    HorizontalDivider()
+                    ReminderSettings(s) { e, em, d, dm -> vm.setReminders(e, em, d, dm) }
                     HorizontalDivider()
                     Row(
                         Modifier.fillMaxWidth().clickable { editBands = true },
@@ -444,4 +448,48 @@ private fun BandsDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
     )
+}
+
+/** Напоминания о тренировке: накануне и в день; время — по нажатию; разрешение на точное время. */
+@Composable
+private fun ReminderSettings(s: SettingsEntity, onChange: (Boolean, Int, Boolean, Int) -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var exact by remember { mutableStateOf(ru.streetlift.tracker.reminder.Reminders.canExact(ctx)) }
+    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+        exact = ru.streetlift.tracker.reminder.Reminders.canExact(ctx)
+        onPauseOrDispose { }
+    }
+    fun hm(m: Int) = String.format(java.util.Locale.US, "%d:%02d", m / 60, m % 60)
+    fun pick(current: Int, set: (Int) -> Unit) {
+        android.app.TimePickerDialog(ctx, { _, h, m -> set(h * 60 + m) }, current / 60, current % 60, true).show()
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Напоминания", style = MaterialTheme.typography.titleMedium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).clickable { pick(s.remindEveMin) { onChange(s.remindEve, it, s.remindDay, s.remindDayMin) } }) {
+                Text("Накануне вечером", style = MaterialTheme.typography.bodyMedium)
+                Text("в ${hm(s.remindEveMin)} — «Завтра тренировка» · нажмите, чтобы изменить время",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = s.remindEve, onCheckedChange = { onChange(it, s.remindEveMin, s.remindDay, s.remindDayMin) })
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).clickable { pick(s.remindDayMin) { onChange(s.remindEve, s.remindEveMin, s.remindDay, it) } }) {
+                Text("В день тренировки", style = MaterialTheme.typography.bodyMedium)
+                Text("в ${hm(s.remindDayMin)} — «Сегодня тренировка», кнопки «Начать» и «Завтра»",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = s.remindDay, onCheckedChange = { onChange(s.remindEve, s.remindEveMin, it, s.remindDayMin) })
+        }
+        if (!exact && (s.remindEve || s.remindDay)) {
+            Text(
+                "Нет разрешения на точное время — напоминание может прийти с опозданием на несколько минут.",
+                style = MaterialTheme.typography.bodySmall,
+                color = ru.streetlift.tracker.ui.theme.WarnOrange,
+            )
+            TextButton(onClick = {
+                ru.streetlift.tracker.reminder.Reminders.exactSettingsIntent(ctx)?.let { runCatching { ctx.startActivity(it) } }
+            }) { Text("Разрешить точное время") }
+        }
+    }
 }

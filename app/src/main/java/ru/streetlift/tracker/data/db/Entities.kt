@@ -48,7 +48,17 @@ data class SettingsEntity(
     val peakSpanDays: Int? = null,
     /** Резины: «Название:кг» через запятую. */
     val bands: String = DEFAULT_BANDS,
+    /** Напоминания: накануне вечером и в день тренировки (минуты от полуночи). */
+    val remindEve: Boolean = true,
+    val remindEveMin: Int = 21 * 60,
+    val remindDay: Boolean = true,
+    val remindDayMin: Int = 17 * 60,
+    /** День выбран вручную (выбор/пропуск) — автоматический выбор дня на пике не вмешивается. */
+    val manualDay: Boolean = false,
 ) {
+    /** Сколько дней прошло после запланированной даты тренировки (0 — не пропущено). */
+    fun missedDays(today: Long): Long = (today - (nextWorkoutEpochDay ?: today)).coerceAtLeast(0)
+
     val bandList: List<ru.streetlift.tracker.domain.Band> get() = ru.streetlift.tracker.domain.Bands.decode(bands)
 
     /** Общая «Разгрузка на этот цикл» — разгружает все упражнения сразу. */
@@ -212,6 +222,8 @@ data class SessionEntity(
     val priority: String? = null,
     /** JSON-снимок цикла и плана до завершения — для отката при удалении последней тренировки. */
     val rollback: String? = null,
+    /** Первая тренировка после паузы ≥ 3 дней в подготовке к пику — на подход меньше. */
+    val afterPause: Boolean = false,
 )
 
 @Serializable

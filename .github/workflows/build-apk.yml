@@ -77,10 +77,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp app/build/outputs/apk/release/app-release.apk streetlift.apk
-          gh release delete latest --yes --cleanup-tag || true
-          gh release create latest streetlift.apk --target "$GITHUB_SHA" \
+          TAG="build-${{ github.run_number }}"
+          # Свой тег на каждую сборку: повторно использовать удалённый тег GitHub не даёт
+          # (релиз остаётся черновиком). Ссылка /releases/latest/download/... ведёт на последний.
+          gh release delete latest --yes || true
+          gh release create "$TAG" streetlift.apk --target "$GITHUB_SHA" \
             --title "Тренировки — сборка ${{ github.run_number }}" \
             --notes "Автосборка из ${GITHUB_SHA::7}. Прямая ссылка: https://github.com/${{ github.repository }}/releases/latest/download/streetlift.apk" \
             --latest
-          # Иногда релиз остаётся черновиком — публикуем явно, иначе прямая ссылка не работает
-          gh release edit latest --draft=false --latest
+          gh release edit "$TAG" --draft=false --latest
+          gh release view "$TAG" --json isDraft,url

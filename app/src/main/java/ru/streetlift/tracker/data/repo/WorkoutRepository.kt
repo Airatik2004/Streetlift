@@ -33,7 +33,7 @@ class WorkoutRepository(private val db: AppDatabase) {
     private val programDao = db.programDao()
     private val sessionDao = db.sessionDao()
 
-    val settings: Flow<SettingsEntity> = settingsDao.observe().map { it ?: SettingsEntity() }
+    val settings: Flow<SettingsEntity> = settingsDao.observe().map { (it ?: SettingsEntity()).also(::applyBands) }
     val days: Flow<List<DayEntity>> = programDao.observeDays()
     val exercises: Flow<List<ExerciseEntity>> = programDao.observeExercises()
     val activeSession: Flow<SessionEntity?> = sessionDao.observeActive()
@@ -47,7 +47,31 @@ class WorkoutRepository(private val db: AppDatabase) {
 
     fun observeSets(sessionId: Long): Flow<List<SetLogEntity>> = sessionDao.observeSets(sessionId)
 
-    suspend fun getSettings(): SettingsEntity = settingsDao.get() ?: SettingsEntity()
+    suspend fun getSettings(): SettingsEntity = (settingsDao.get() ?: SettingsEntity()).also(::applyBands)
+
+    /** Набор резин из настроек — для лестницы помощи и подписей. */
+    private fun applyBands(s: SettingsEntity) {
+        val list = s.bandList
+        if (list != ru.streetlift.tracker.domain.Bands.current) ru.streetlift.tracker.domain.Bands.current = list
+    }
+
+    /** Отрицательные веса — к ближайшему сочетанию резин; где резин нет — 0. */
+    private suspend fun snapAssistWeights() {
+        getSettings()
+        val fixed = programDao.getAllExercises().mapNotNull { e ->
+            val w = e.loadScale.snap(e.weightKg)
+            if (kotlin.math.abs(w - e.weightKg) > 0.001f) e.copy(weightKg = w) else null
+        }
+        if (fixed.isNotEmpty()) programDao.updateExercises(fixed)
+    }
+
+    /** Сохранить набор резин (название + помощь в кг). */
+    suspend fun setBands(bands: List<ru.streetlift.tracker.domain.Band>) {
+        val clean = bands.filter { it.name.isNotBlank() && it.kg > 0f }
+            .map { it.copy(name = it.name.replace(",", " ").replace(":", " ").trim()) }
+        settingsDao.upsert(getSettings().copy(bands = ru.streetlift.tracker.domain.Bands.encode(clean)))
+        snapAssistWeights()
+    }
     suspend fun getSession(id: Long): SessionEntity? = sessionDao.getSession(id)
     suspend fun getExercisesForDay(dayId: Long): List<ExerciseEntity> = programDao.getExercisesForDay(dayId)
     suspend fun getDay(id: Long): DayEntity? = programDao.getDay(id)
@@ -62,6 +86,7 @@ class WorkoutRepository(private val db: AppDatabase) {
                 settingsDao.upsert(SettingsEntity())
             }
             if (programDao.getStages().isEmpty()) programDao.insertStages(DefaultTemplate.builtInStages())
+            snapAssistWeights()
         }
     }
 

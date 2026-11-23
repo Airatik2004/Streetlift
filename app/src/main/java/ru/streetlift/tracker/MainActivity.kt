@@ -27,6 +27,11 @@ class MainActivity : ComponentActivity() {
             NavRequests.openWorkout.value = id
             intent?.removeExtra(NavRequests.EXTRA_OPEN_SESSION)
         }
+        val tab = intent?.getIntExtra(NavRequests.EXTRA_OPEN_TAB, -1) ?: -1
+        if (tab >= 0) {
+            NavRequests.openTab.value = tab
+            intent?.removeExtra(NavRequests.EXTRA_OPEN_TAB)
+        }
     }
 
     private val notificationPermission =

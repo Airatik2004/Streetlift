@@ -257,7 +257,7 @@ class TimerService : Service() {
             .setSilent(true)
             .setCategory(NotificationCompat.CATEGORY_STOPWATCH)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setContentIntent(openAppIntent())
+            .setContentIntent(if (r != null) openWorkoutIntent(r.session.id) else openTimerIntent())
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
         if (r != null) {
             // Тренировка: ⏮ Предыдущий · ⏯ Пауза · ⏭ Следующий — как на экране
@@ -286,7 +286,7 @@ class TimerService : Service() {
             .setSilent(true)
             .setCategory(NotificationCompat.CATEGORY_STOPWATCH)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setContentIntent(openAppIntent())
+            .setContentIntent(openTimerIntent())
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
         if (iv.active) {
             b.setContentTitle("${iv.phase.title} · ${Fmt.clock(iv.remainingSeconds)}" + if (!iv.running) " · пауза" else "")
@@ -328,7 +328,7 @@ class TimerService : Service() {
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setAutoCancel(true)
             .setTimeoutAfter(60_000)
-            .setContentIntent(openAppIntent())
+            .setContentIntent(ActiveWorkout.result.value?.let { openWorkoutIntent(it.session.id) } ?: openTimerIntent())
             .build()
 
     @SuppressLint("MissingPermission")
@@ -344,6 +344,14 @@ class TimerService : Service() {
         val i = Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         return PendingIntent.getActivity(this, 0, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    }
+
+    /** Открыть вкладку «Таймер». */
+    private fun openTimerIntent(): PendingIntent {
+        val i = Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            .putExtra(ru.streetlift.tracker.NavRequests.EXTRA_OPEN_TAB, ru.streetlift.tracker.NavRequests.TAB_TIMER)
+        return PendingIntent.getActivity(this, 11, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
     private fun openWorkoutIntent(sessionId: Long): PendingIntent {

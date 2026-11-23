@@ -36,7 +36,7 @@ fun SetEditDialog(
     onSave: (SetLogEntity) -> Unit,
     onDelete: (SetLogEntity) -> Unit,
 ) {
-    var weight by remember { mutableStateOf(Fmt.weight(log.weightKg).removeSuffix(" кг")) }
+    var weight by remember { mutableStateOf(Fmt.weightValue(log.weightKg)) }
     var reps by remember { mutableStateOf(log.reps.toString()) }
     var rir by remember { mutableIntStateOf(log.rir) }
     var confirmDelete by remember { mutableStateOf(false) }

@@ -68,6 +68,13 @@ fun AppRoot(repo: WorkoutRepository) {
     // Нижние вкладки листаются свайпом
     val pager = androidx.compose.foundation.pager.rememberPagerState { tabs.size }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val tabRequest by ru.streetlift.tracker.NavRequests.openTab.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(tabRequest) {
+        val tab = tabRequest ?: return@LaunchedEffect
+        ru.streetlift.tracker.NavRequests.openTab.value = null
+        if (nav.currentBackStackEntry?.destination?.route != "main") nav.popBackStack("main", inclusive = false)
+        pager.scrollToPage(tab.coerceIn(0, tabs.size - 1))
+    }
 
     Scaffold(
         bottomBar = {

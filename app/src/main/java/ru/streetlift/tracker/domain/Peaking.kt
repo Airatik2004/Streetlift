@@ -36,7 +36,25 @@ object Peaking {
      * Свой вес / резина (≤ 0): процент посчитать нельзя — облегчаем шагами
      * (85% → −2 шага, 87–90% → −1 шаг): 0 → −5, −15 → −20.
      */
-    fun reducedWeight(weight: Float, step: Float, pct: Float, bodyWeight: Float? = null): Float {
+    fun reducedWeight(weight: Float, step: Float, pct: Float, bodyWeight: Float? = null, assists: List<Float>? = null): Float {
+        if (assists != null) {
+            // Резины: облегчение — ближайшая допустимая ступень легче рабочей
+            val scale = LoadScale(step, assists)
+            if (bodyWeight != null && bodyWeight > 0f) {
+                val target = pct * (bodyWeight + weight) - bodyWeight
+                return scale.lighterNear(weight, target) ?: weight
+            }
+            if (weight > 0f) {
+                val st = if (step > 0f) step else 2.5f
+                var steps = (weight * pct / st).roundToInt()
+                if (steps * st >= weight) steps -= 1
+                return ProgressionEngine.roundWeight(steps * st).let { if (it < 0f) scale.down(0f) else it }
+            }
+            val k = if (pct <= 0.86f) 2 else 1
+            var w = weight
+            repeat(k) { w = scale.down(w) }
+            return w
+        }
         val st = if (step > 0f) step else 2.5f
         if (bodyWeight != null && bodyWeight > 0f) {
             // Процент от полной нагрузки «свой вес + знаковый вес»: 75 кг, −15 → 0.85 × 60 = 51 → −24
@@ -94,7 +112,7 @@ object Peaking {
             PeakPhase.REST -> resolveReps(config, state, type, globalDeload, PeakPhase.TONUS, isPeakTarget, bodyWeight)?.copy(peakPhase = phase)
             PeakPhase.PRE_PEAK -> if (isPeakTarget) {
                 SessionPlan(
-                    weightKg = ProgressionEngine.roundWeight(w + config.weightStep),
+                    weightKg = config.scale.up(w),
                     sets = config.minSets, repsMin = 3, repsMax = 5, targetReps = 3,
                     rirMin = 1, rirMax = 1, isDeload = false, isEmergencyDeload = false,
                     peakPhase = phase, isPeakTarget = true,
@@ -122,7 +140,7 @@ object Peaking {
                 null // многоповторка в тейпере пропускается
             } else {
                 SessionPlan(
-                    weightKg = reducedWeight(w, config.weightStep, 0.875f, bodyWeight),
+                    weightKg = reducedWeight(w, config.weightStep, 0.875f, bodyWeight, config.assists),
                     sets = ProgressionEngine.deloadSets(planned),
                     repsMin = config.minReps, repsMax = config.maxReps, targetReps = config.minReps,
                     rirMin = 3, rirMax = 4, isDeload = false, isEmergencyDeload = false, peakPhase = phase,
@@ -130,7 +148,7 @@ object Peaking {
             }
             PeakPhase.TONUS -> if (isPeakTarget) {
                 SessionPlan(
-                    weightKg = reducedWeight(w, config.weightStep, 0.85f, bodyWeight),
+                    weightKg = reducedWeight(w, config.weightStep, 0.85f, bodyWeight, config.assists),
                     sets = 2, repsMin = 2, repsMax = 3, targetReps = 2, rirMin = 4, rirMax = 4,
                     isDeload = false, isEmergencyDeload = false, peakPhase = phase, isPeakTarget = true,
                 )

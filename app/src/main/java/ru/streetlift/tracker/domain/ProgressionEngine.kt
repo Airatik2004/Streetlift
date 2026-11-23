@@ -16,7 +16,11 @@ data class ExerciseConfig(
     val weightStep: Float,
     /** Статика: minReps..maxReps — секунды удержания, цель растёт на +2 с за цикл. */
     val isSeconds: Boolean = false,
+    /** Лестница помощи резин: null — знаковый вес шагами (старое), пусто — ниже 0 нельзя. */
+    val assists: List<Float>? = null,
 ) {
+    val scale: LoadScale get() = LoadScale(weightStep, assists)
+
     val unit: String get() = if (isSeconds) "с" else "повт."
     val targetStep: Int get() = if (isSeconds) 2 else 1
 }
@@ -266,7 +270,8 @@ object ProgressionEngine {
             }
 
             allMax && !fatigue -> {
-                val newWeight = roundWeight(work + config.weightStep)
+                // Ступень тяжелее: резина слабее → свой вес → +шаг
+                val newWeight = config.scale.up(work)
                 next = PlanState(
                     weightKg = newWeight,
                     plannedSets = config.minSets,

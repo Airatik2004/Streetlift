@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         StageEntity::class,
         StageArchiveEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -26,6 +26,13 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun sessionDao(): SessionDao
 
     companion object {
+        /** v11: набор резин (помощь в кг). Отрицательные веса приводятся к сочетаниям при запуске. */
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE settings ADD COLUMN bands TEXT NOT NULL DEFAULT '$DEFAULT_BANDS'")
+            }
+        }
+
         /**
          * v10: свой счётчик разгрузки у каждого упражнения и длина подводки к пику.
          * Счётчик берётся из общего номера цикла, чтобы ближайшая разгрузка не сдвинулась.
@@ -86,7 +93,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "streetlift.db")
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_8_9, MIGRATION_9_10)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                 // Самая первая сборка (v1) не сохраняется — пересоздаётся
                 .fallbackToDestructiveMigration()
                 .build()

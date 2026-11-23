@@ -250,7 +250,7 @@ fun HistoryScreen(repo: WorkoutRepository) {
                                     modifier = Modifier.combinedClickable(onClick = {}, onLongClick = { editSet = log }),
                                 ) {
                                     Text(
-                                        "${Fmt.weight(log.weightKg).removeSuffix(" кг")}×${log.reps}${if (log.isSeconds) "с" else ""} · ${Fmt.rirValue(log.rir)}",
+                                        "${Fmt.weightValue(log.weightKg)}×${log.reps}${if (log.isSeconds) "с" else ""} · ${Fmt.rirValue(log.rir)}",
                                         style = MaterialTheme.typography.bodySmall,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                     )

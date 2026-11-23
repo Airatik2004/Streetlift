@@ -56,6 +56,7 @@ fun Stepper(
     onMinus: () -> Unit,
     onPlus: () -> Unit,
     onValueClick: (() -> Unit)? = null,
+    sub: String? = null,
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -72,7 +73,30 @@ fun Stepper(
             )
             FilledTonalIconButton(onClick = onPlus) { Icon(Icons.Filled.Add, contentDescription = "Больше") }
         }
+        // Пояснение под значением (какие резины взять)
+        sub?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
+        }
     }
+}
+
+/** Вес кнопками −/+ по шкале упражнения: резины → свой вес → +шаг. */
+@Composable
+fun WeightStepper(
+    weight: Float,
+    scale: ru.streetlift.tracker.domain.LoadScale,
+    onChange: (Float) -> Unit,
+    onValueClick: (() -> Unit)? = null,
+) {
+    Stepper(
+        label = "Вес (шаг ${ru.streetlift.tracker.domain.Fmt.step(scale.step)})",
+        value = ru.streetlift.tracker.domain.Fmt.weightValue(weight),
+        onMinus = { onChange(scale.down(weight)) },
+        onPlus = { onChange(scale.up(weight)) },
+        onValueClick = onValueClick,
+        sub = ru.streetlift.tracker.domain.Bands.describe(weight)?.let { "резина: $it" }
+            ?: if (weight == 0f) "свой вес" else null,
+    )
 }
 
 /** Диалог ввода одного значения. */

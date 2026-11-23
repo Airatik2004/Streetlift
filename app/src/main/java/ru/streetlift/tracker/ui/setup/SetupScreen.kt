@@ -63,8 +63,8 @@ class SetupViewModel(private val repo: WorkoutRepository) : ViewModel() {
     fun save(drafts: List<WorkoutRepository.SetupDraft>) = viewModelScope.launch { repo.completeSetup(drafts) }
 }
 
-/** Черновик строки: вес хранится строкой, чтобы можно было печатать «−» и запятую. */
-private data class Draft(val stage: String?, val weight: String, val calibrate: Boolean)
+/** Черновик строки. */
+private data class Draft(val stage: String?, val weight: Float, val calibrate: Boolean)
 
 /** «Настройка стартовых параметров» — показывается при первом запуске (и из редактора). */
 @Composable
@@ -79,7 +79,7 @@ fun SetupScreen(repo: WorkoutRepository) {
             if (e.id !in drafts) {
                 drafts[e.id] = Draft(
                     stage = e.leverageStage,
-                    weight = Fmt.weight(e.weightKg).removeSuffix(" кг"),
+                    weight = e.loadScale.snap(e.weightKg),
                     // По умолчанию — подобрать на тренировке, если вес ещё не задан
                     calibrate = e.mode == ExerciseMode.CALIBRATION || e.weightKg == 0f,
                 )
@@ -100,7 +100,7 @@ fun SetupScreen(repo: WorkoutRepository) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Настройка стартовых параметров", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text(
-                    "Для каждого упражнения введите известный рабочий вес (+10, 0, −15 кг) " +
+                    "Для каждого упражнения выберите известный рабочий вес кнопками −/+ (отягощение, свой вес или резины) " +
                         "или включите «Подобрать на тренировке» — тогда первый цикл пройдёт в режиме калибровки: " +
                         "вы подберёте вес под коридор повторений с запасом 2 и запишете 3 рабочих подхода.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -133,15 +133,9 @@ fun SetupScreen(repo: WorkoutRepository) {
                         Switch(checked = d.calibrate, onCheckedChange = { drafts[e.id] = d.copy(calibrate = it) })
                     }
                     if (!d.calibrate) {
-                        OutlinedTextField(
-                            value = d.weight,
-                            onValueChange = { drafts[e.id] = d.copy(weight = it) },
-                            label = { Text("Рабочий вес, кг") },
-                            singleLine = true,
-                            isError = parseSignedFloat(d.weight) == null,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                        androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            ru.streetlift.tracker.ui.common.WeightStepper(d.weight, e.loadScale, { drafts[e.id] = d.copy(weight = it) })
+                        }
                     }
                 }
             }
@@ -152,20 +146,14 @@ fun SetupScreen(repo: WorkoutRepository) {
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 Button(
                     onClick = {
-                        val bad = ordered.firstOrNull { e ->
-                            val d = drafts[e.id]
-                            d != null && !d.calibrate && parseSignedFloat(d.weight) == null
-                        }
-                        if (bad != null) {
-                            error = "Проверьте вес: «${bad.name}»"
-                        } else {
+                        run {
                             vm.save(
                                 ordered.mapNotNull { e ->
                                     val d = drafts[e.id] ?: return@mapNotNull null
                                     WorkoutRepository.SetupDraft(
                                         exerciseId = e.id,
                                         stage = d.stage,
-                                        weightKg = if (d.calibrate) e.weightKg else parseSignedFloat(d.weight) ?: 0f,
+                                        weightKg = if (d.calibrate) e.weightKg else d.weight,
                                         calibrate = d.calibrate,
                                     )
                                 },

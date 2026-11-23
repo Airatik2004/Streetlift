@@ -1,6 +1,12 @@
 package ru.streetlift.tracker.ui.editor
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -69,6 +75,7 @@ class EditorViewModel(private val repo: WorkoutRepository) : ViewModel() {
     fun setAlternating(day: DayEntity, on: Boolean) = viewModelScope.launch { repo.updateDay(day.copy(alternating = on)) }
     fun setDeloadEvery(n: Int) = viewModelScope.launch { repo.setDeloadEvery(n) }
     fun setDeload(want: Boolean) = viewModelScope.launch { repo.setDeload(want) }
+    fun setBands(b: List<ru.streetlift.tracker.domain.Band>) = viewModelScope.launch { repo.setBands(b) }
     fun setPriority(m: ru.streetlift.tracker.domain.PriorityMode) = viewModelScope.launch { repo.setPriorityMode(m) }
     fun setAutoStart(b: Boolean) = viewModelScope.launch { repo.setAutoStartTimer(b) }
     fun resetProgram() = viewModelScope.launch { repo.resetProgram() }
@@ -87,6 +94,7 @@ fun EditorScreen(repo: WorkoutRepository) {
 
     var confirmReset by remember { mutableStateOf(false) }
     var editExercise by remember { mutableStateOf<ExerciseEntity?>(null) }
+    var editBands by remember { mutableStateOf(false) }
 
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -193,6 +201,21 @@ fun EditorScreen(repo: WorkoutRepository) {
                         )
                     }
                     HorizontalDivider()
+                    Row(
+                        Modifier.fillMaxWidth().clickable { editBands = true },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Резины", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                s.bandList.joinToString(" · ") { "${it.name} ${Fmt.step(it.kg)} кг" }.ifEmpty { "нет" },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Icon(Icons.Filled.Edit, contentDescription = "Изменить")
+                    }
+                    HorizontalDivider()
                     ru.streetlift.tracker.ui.common.PrioritySwitch(s.priorityMode, s.priority) { vm.setPriority(it) }
                     HorizontalDivider()
                     val globalDeload = s.forcedDeload
@@ -238,6 +261,13 @@ fun EditorScreen(repo: WorkoutRepository) {
             },
         )
     }
+    if (editBands) {
+        BandsDialog(
+            initial = s.bandList,
+            onDismiss = { editBands = false },
+            onSave = { vm.setBands(it); editBands = false },
+        )
+    }
     editExercise?.let { e ->
         CalibrationDialog(
             exercise = e,
@@ -265,7 +295,7 @@ private fun CalibrationDialog(
     var calibrate by remember { mutableStateOf(exercise.mode == ExerciseMode.CALIBRATION) }
     var deload by remember { mutableStateOf(exercise.emergencyDeloadNext) }
     var skipPlanned by remember { mutableStateOf(exercise.skipPlannedDeload == true) }
-    var weight by remember { mutableStateOf(Fmt.weight(exercise.weightKg).removeSuffix(" кг")) }
+    var weight by remember { mutableStateOf(exercise.loadScale.snap(exercise.weightKg)) }
     var error by remember { mutableStateOf<String?>(null) }
     val stageChanged = stage != exercise.leverageStage
 
@@ -274,20 +304,9 @@ private fun CalibrationDialog(
         title = { Text(exercise.name) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = weight,
-                    onValueChange = { weight = it },
-                    label = { Text("Текущий рабочий вес, кг") },
-                    singleLine = true,
-                    isError = parseSignedFloat(weight) == null,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text(
-                    "+24 — отягощение, 0 — свой вес, −15 — резина/облегчение.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    ru.streetlift.tracker.ui.common.WeightStepper(weight, exercise.loadScale, { weight = it })
+                }
                 if (exercise.stageGroup != null) {
                     StagePicker(
                         stages = stages,
@@ -335,10 +354,8 @@ private fun CalibrationDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                val w = parseSignedFloat(weight)
-                if (w == null) {
-                    error = "Проверьте вес"
-                } else {
+                val w = weight
+                run {
                     onSave(
                         exercise.copy(
                             weightKg = w,
@@ -367,4 +384,64 @@ internal fun deloadInText(e: ExerciseEntity, every: Int): String? {
         else -> "циклов"
     }
     return "Разгрузка через $k $w"
+}
+
+/** Набор резин: название и помощь в кг; можно добавить новую и удалить. */
+@Composable
+private fun BandsDialog(
+    initial: List<ru.streetlift.tracker.domain.Band>,
+    onDismiss: () -> Unit,
+    onSave: (List<ru.streetlift.tracker.domain.Band>) -> Unit,
+) {
+    val rows = remember { androidx.compose.runtime.mutableStateListOf<Pair<String, String>>().apply { addAll(initial.map { it.name to Fmt.step(it.kg) }) } }
+    val valid = rows.all { (n, kg) -> n.isNotBlank() && (kg.replace(',', '.').toFloatOrNull() ?: 0f) > 0f }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Резины") },
+        text = {
+            Column(
+                Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    "Помощь каждой резины в кг. Лестница сочетаний собирается сама.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                rows.forEachIndexed { i, (name, kg) ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { rows[i] = it to kg },
+                            label = { Text("Название") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1.4f),
+                        )
+                        OutlinedTextField(
+                            value = kg,
+                            onValueChange = { rows[i] = name to it },
+                            label = { Text("кг") },
+                            singleLine = true,
+                            isError = (kg.replace(',', '.').toFloatOrNull() ?: 0f) <= 0f,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { rows.removeAt(i) }) { Icon(Icons.Filled.Delete, contentDescription = "Удалить") }
+                    }
+                }
+                if (rows.size < 8) {
+                    TextButton(onClick = { rows.add("" to "") }) { Text("+ Добавить резину") }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onSave(rows.map { (n, kg) -> ru.streetlift.tracker.domain.Band(n.trim(), kg.replace(',', '.').toFloat()) }.sortedByDescending { it.kg })
+                },
+                enabled = valid,
+            ) { Text("Сохранить") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
 }

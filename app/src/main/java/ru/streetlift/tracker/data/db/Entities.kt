@@ -15,6 +15,8 @@ import ru.streetlift.tracker.domain.PlanState
 
 /** Глобальное состояние программы (одна строка, id = 1). */
 @Serializable
+const val DEFAULT_BANDS = "Зелёная:75,Фиолетовая:45,Чёрная:30,Красная:20"
+
 @Entity(tableName = "settings")
 data class SettingsEntity(
     @PrimaryKey val id: Int = 1,
@@ -44,7 +46,11 @@ data class SettingsEntity(
     val mesoIndex: Int = 0,
     /** За сколько дней до пика он выставлен (≤ 22): при 15–18 подготовка уходит в снижение. */
     val peakSpanDays: Int? = null,
+    /** Резины: «Название:кг» через запятую. */
+    val bands: String = DEFAULT_BANDS,
 ) {
+    val bandList: List<ru.streetlift.tracker.domain.Band> get() = ru.streetlift.tracker.domain.Bands.decode(bands)
+
     /** Общая «Разгрузка на этот цикл» — разгружает все упражнения сразу. */
     val forcedDeload: Boolean get() = deloadOverride == DeloadOverride.FORCE_ON
 
@@ -141,7 +147,17 @@ data class ExerciseEntity(
     /** Не участвует в суперсете — идёт в конце дня (статика и «всегда последние»). */
     val outOfSuperset: Boolean get() = isSeconds || alwaysLast
 
-    fun toConfig() = ExerciseConfig(minSets, maxSets, minReps, maxReps, targetRirMin, targetRirMax, weightStep, isSeconds)
+    /** Резина для помощи: нельзя в стойке (облегчение стадиями) и в задней дельте (гантели). */
+    val allowBands: Boolean get() = stageGroup != ru.streetlift.tracker.domain.StageGroups.HANDSTAND && shareKey == null
+
+    /** Шкала нагрузки: резины текущего набора → свой вес → +шаг. */
+    val loadScale: ru.streetlift.tracker.domain.LoadScale
+        get() = ru.streetlift.tracker.domain.LoadScale(weightStep, if (allowBands) ru.streetlift.tracker.domain.Bands.ladder() else emptyList())
+
+    fun toConfig() = ExerciseConfig(
+        minSets, maxSets, minReps, maxReps, targetRirMin, targetRirMax, weightStep, isSeconds,
+        assists = loadScale.assists,
+    )
 
     fun toState() = PlanState(
         weightKg = weightKg,

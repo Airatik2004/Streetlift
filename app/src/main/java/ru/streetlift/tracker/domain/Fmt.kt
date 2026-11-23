@@ -6,14 +6,20 @@ import kotlin.math.roundToInt
 
 /** Форматирование чисел для интерфейса. */
 object Fmt {
-    /** «+24 кг», «0 кг», «−15 кг», «+12.5 кг». */
+    /** «+24 кг», «0 кг», «−50 кг · Чёрная + Красная», «+12.5 кг». */
     fun weight(w: Float): String {
+        val base = "${weightValue(w)} кг"
+        return Bands.describe(w)?.let { "$base · $it" } ?: base
+    }
+
+    /** Число со знаком без единиц: «+24», «0», «−15». */
+    fun weightValue(w: Float): String {
         val hundredths = (w * 100f).roundToInt()
         val num = number(abs(hundredths))
         return when {
-            hundredths > 0 -> "+$num кг"
-            hundredths < 0 -> "−$num кг"
-            else -> "0 кг"
+            hundredths > 0 -> "+$num"
+            hundredths < 0 -> "−$num"
+            else -> "0"
         }
     }
 

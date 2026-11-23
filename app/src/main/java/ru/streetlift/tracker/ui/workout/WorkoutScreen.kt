@@ -248,7 +248,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                             )
                             if (log != null) {
                                 Text(
-                                    "${Fmt.weight(log.weightKg).removeSuffix(" кг")} × ${log.reps}${if (log.isSeconds) " с" else ""} · ${Fmt.rirValue(log.rir)} ✓",
+                                    "${Fmt.weightValue(log.weightKg)} × ${log.reps}${if (log.isSeconds) " с" else ""} · ${Fmt.rirValue(log.rir)} ✓",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = DeloadGreen,
                                 )
@@ -402,12 +402,13 @@ private fun WorkPanel(
     if (editWeight) {
         TextInputDialog(
             title = "Вес, кг",
-            initial = Fmt.weight(weight).removeSuffix(" кг"),
+            initial = Fmt.weightValue(weight),
             keyboardType = KeyboardType.Text,
-            hint = "Положительный — отягощение, 0 — свой вес, отрицательный — резина",
+            hint = "Положительный — отягощение, 0 — свой вес, отрицательный — помощь резин (кг)",
             onDismiss = { editWeight = false },
             onConfirm = { t ->
-                parseSignedFloat(t)?.let { onWeight(ProgressionEngine.roundWeight(it)) }
+                // Резины — к ближайшему сочетанию; где резин нет — не ниже 0
+                parseSignedFloat(t)?.let { onWeight(cur.exercise.loadScale.snap(ProgressionEngine.roundWeight(it))) }
                 editWeight = false
             },
         )
@@ -457,11 +458,10 @@ private fun WorkPanel(
         }
     }
 
-    Stepper(
-        label = "Вес (шаг ${Fmt.step(step)})",
-        value = Fmt.weight(weight).removeSuffix(" кг"),
-        onMinus = { onWeight(ProgressionEngine.roundWeight(weight - step)) },
-        onPlus = { onWeight(ProgressionEngine.roundWeight(weight + step)) },
+    ru.streetlift.tracker.ui.common.WeightStepper(
+        weight = weight,
+        scale = cur.exercise.loadScale,
+        onChange = onWeight,
         onValueClick = { editWeight = true },
     )
     Spacer(Modifier.height(6.dp))

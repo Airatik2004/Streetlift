@@ -72,6 +72,7 @@ import ru.streetlift.tracker.domain.ProgressionEngine
 import ru.streetlift.tracker.timer.RestTimer
 import ru.streetlift.tracker.timer.TimerActions
 import ru.streetlift.tracker.ui.common.ConfirmDialog
+import ru.streetlift.tracker.ui.common.SetEditDialog
 import ru.streetlift.tracker.ui.common.StagePicker
 import ru.streetlift.tracker.ui.common.Stepper
 import ru.streetlift.tracker.ui.common.Tag
@@ -282,13 +283,15 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
         )
     }
     logToDelete?.let { log ->
-        ConfirmDialog(
-            title = "Удалить подход?",
-            text = "${log.exerciseName}: ${Fmt.weight(log.weightKg)} × ${log.reps}, RIR ${Fmt.rirValue(log.rir)}",
-            confirm = "Удалить",
+        SetEditDialog(
+            log = log,
             onDismiss = { logToDelete = null },
-            onConfirm = {
-                ActiveWorkout.deleteLog(ctx, log)
+            onSave = {
+                ActiveWorkout.updateLog(ctx, it)
+                logToDelete = null
+            },
+            onDelete = {
+                ActiveWorkout.deleteLog(ctx, it)
                 logToDelete = null
             },
         )
@@ -451,7 +454,7 @@ private fun WorkPanel(
         }
     }
     Text(
-        "⏭ «Следующий» — записать подход и начать отдых",
+        "«Следующий» — записать подход и начать отдых",
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 6.dp),

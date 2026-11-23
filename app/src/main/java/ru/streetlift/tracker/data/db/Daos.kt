@@ -153,6 +153,9 @@ interface SessionDao {
     @Delete
     suspend fun deleteSet(set: SetLogEntity)
 
+    @Update
+    suspend fun updateSet(set: SetLogEntity)
+
     @Query("SELECT * FROM set_logs WHERE sessionId = :sessionId ORDER BY loggedAt")
     fun observeSets(sessionId: Long): Flow<List<SetLogEntity>>
 

@@ -5,7 +5,14 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
+import ru.streetlift.tracker.ui.common.SetEditDialog
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -109,12 +116,16 @@ class HistoryViewModel(private val repo: WorkoutRepository) : ViewModel() {
     val rollbackableId: StateFlow<Long?> =
         repo.rollbackableSessionId.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    fun updateSet(set: SetLogEntity) = viewModelScope.launch { repo.updateSet(set) }
+    fun deleteSet(set: SetLogEntity) = viewModelScope.launch { repo.deleteSet(set) }
+
     fun delete(id: Long, onResult: (String) -> Unit) = viewModelScope.launch {
         val rolled = repo.deleteSession(id)
         onResult(if (rolled) "Тренировка удалена, план и цикл возвращены к состоянию до неё" else "Тренировка удалена из истории")
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HistoryScreen(repo: WorkoutRepository) {
     val vm: HistoryViewModel = viewModel(factory = viewModelFactory { initializer { HistoryViewModel(repo) } })
@@ -126,6 +137,7 @@ fun HistoryScreen(repo: WorkoutRepository) {
 
     var pendingImport by remember { mutableStateOf<Uri?>(null) }
     var toDelete by remember { mutableStateOf<SessionEntity?>(null) }
+    var editSet by remember { mutableStateOf<SetLogEntity?>(null) }
     var expanded by remember { mutableStateOf(setOf<Long>()) }
 
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
@@ -228,10 +240,23 @@ fun HistoryScreen(repo: WorkoutRepository) {
                         }
                     }
                     entry.byExercise.forEach { (name, logs) ->
-                        Text(
-                            "$name: " + logs.joinToString("  ") { "${Fmt.weight(it.weightKg).removeSuffix(" кг")}×${it.reps}(${Fmt.rirValue(it.rir)})" },
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
+                        Text(name, style = MaterialTheme.typography.bodyMedium)
+                        // Долгое нажатие на подход — изменить
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            logs.forEach { log ->
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.combinedClickable(onClick = {}, onLongClick = { editSet = log }),
+                                ) {
+                                    Text(
+                                        "${Fmt.weight(log.weightKg).removeSuffix(" кг")}×${log.reps} · ${Fmt.rirValue(log.rir)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    )
+                                }
+                            }
+                        }
                     }
                     if (isOpen && s.summary.isNotBlank()) {
                         HorizontalDivider()
@@ -258,6 +283,20 @@ fun HistoryScreen(repo: WorkoutRepository) {
             onConfirm = {
                 pendingImport = null
                 vm.importBackup(ctx.contentResolver, uri, toast)
+            },
+        )
+    }
+    editSet?.let { log ->
+        SetEditDialog(
+            log = log,
+            onDismiss = { editSet = null },
+            onSave = {
+                vm.updateSet(it)
+                editSet = null
+            },
+            onDelete = {
+                vm.deleteSet(it)
+                editSet = null
             },
         )
     }

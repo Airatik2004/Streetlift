@@ -163,6 +163,11 @@ object ActiveWorkout {
         extra.update { it + (exerciseId to (target - b.plan.sets)) }
     }
 
+    fun updateLog(ctx: Context, log: SetLogEntity) {
+        val app = ctx.applicationContext
+        scope.launch { repo(app).updateSet(log) }
+    }
+
     fun deleteLog(ctx: Context, log: SetLogEntity) {
         val app = ctx.applicationContext
         scope.launch { repo(app).deleteSet(log) }

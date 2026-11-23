@@ -85,6 +85,9 @@ class WorkoutRepository(private val db: AppDatabase) {
 
     suspend fun deleteSet(set: SetLogEntity) = sessionDao.deleteSet(set)
 
+    /** Исправить записанный подход (вес, повторы, запас). */
+    suspend fun updateSet(set: SetLogEntity) = sessionDao.updateSet(set)
+
     suspend fun discardSession(sessionId: Long) = sessionDao.deleteSession(sessionId)
 
     /**

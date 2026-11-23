@@ -17,6 +17,9 @@ import ru.streetlift.tracker.data.db.StageEntity
 import ru.streetlift.tracker.domain.CycleState
 import ru.streetlift.tracker.domain.DeloadOverride
 import ru.streetlift.tracker.domain.ExerciseMode
+import ru.streetlift.tracker.domain.PeakPhase
+import ru.streetlift.tracker.domain.Peaking
+import ru.streetlift.tracker.domain.StageGroups
 import ru.streetlift.tracker.domain.ExerciseType
 import ru.streetlift.tracker.domain.ProgressionEngine
 import ru.streetlift.tracker.domain.SetResult
@@ -67,16 +70,52 @@ class WorkoutRepository(private val db: AppDatabase) {
         val s = getSettings()
         val day = programDao.getDay(dayId) ?: error("День не найден")
         val global = ProgressionEngine.isGlobalDeload(s.cycleInMeso, s.deloadEvery, s.deloadOverride)
+        val phase = Peaking.phaseOn(s.peakEpochDay, today())
         sessionDao.insertSession(
             SessionEntity(
                 dayId = day.id,
                 dayName = day.name,
                 startedAt = System.currentTimeMillis(),
                 roundNumber = s.completedRounds + 1,
-                isDeload = global,
+                // Подводка перекрывает разгрузку
+                isDeload = global && phase == PeakPhase.NONE,
                 alternating = day.alternating,
+                peakPhase = phase.takeIf { it != PeakPhase.NONE }?.name,
+                peakIds = s.peakExerciseIds.takeIf { phase != PeakPhase.NONE },
             ),
         )
+    }
+
+    // ---------------- Подводка к старту ----------------
+
+    suspend fun setPeak(epochDay: Long, exerciseIds: Set<Long>, bodyWeightKg: Float?) {
+        settingsDao.upsert(
+            getSettings().copy(
+                peakEpochDay = epochDay,
+                peakExerciseIds = exerciseIds.joinToString(","),
+                bodyWeightKg = bodyWeightKg ?: getSettings().bodyWeightKg,
+            ),
+        )
+    }
+
+    suspend fun clearPeak() {
+        settingsDao.upsert(getSettings().copy(peakEpochDay = null, peakExerciseIds = ""))
+    }
+
+    /**
+     * На следующий день после старта подводка выключается: мезоцикл с круга 1,
+     * пиковые упражнения — на 1 круг в калибровку (новая база с учётом выросшей формы).
+     */
+    suspend fun checkPeakExpired() = db.withTransaction {
+        val s = getSettings()
+        val d = s.peakEpochDay ?: return@withTransaction
+        if (today() <= d) return@withTransaction
+        val ids = s.peakIds
+        val recalibrate = programDao.getAllExercises().filter { it.id in ids }.map {
+            it.withState(ProgressionEngine.onStageChanged(it.toState()))
+        }
+        if (recalibrate.isNotEmpty()) programDao.updateExercises(recalibrate)
+        settingsDao.upsert(s.copy(peakEpochDay = null, peakExerciseIds = "", cycleInMeso = 1, deloadOverride = DeloadOverride.AUTO))
     }
 
     suspend fun logSet(set: SetLogEntity) {
@@ -139,7 +178,9 @@ class WorkoutRepository(private val db: AppDatabase) {
         val rollback = runCatching { BackupJson.encodeRollback(RollbackData(s, exercises)) }.getOrNull()
 
         val lines = mutableListOf<String>()
-        val updated = exercises.map { ex ->
+        val peak = session.peakPhase?.let { runCatching { PeakPhase.valueOf(it) }.getOrNull() }
+        if (peak != null) lines += "Подводка к старту (${peak.title}) — рабочий план не меняется, результаты в истории."
+        val updated = if (peak != null) emptyList() else exercises.map { ex ->
             val exLogs = logs.filter { it.exerciseId == ex.id }
             val wasDeload = session.isDeload || ex.emergencyDeloadNext
             val result = ProgressionEngine.computeNext(
@@ -147,6 +188,7 @@ class WorkoutRepository(private val db: AppDatabase) {
                 ex.toState(),
                 exLogs.map { SetResult(it.weightKg, it.reps, it.rir) },
                 wasDeload,
+                stageCeilingEligible = ex.stageCeilingEligible,
             )
             lines += "• ${ex.name}: ${result.message}"
             val next = ex.withState(result.state)
@@ -342,18 +384,6 @@ class WorkoutRepository(private val db: AppDatabase) {
             .copy(leverageStage = newStage)
     }
 
-    /** Добавить свою стадию в конец справочника. Возвращает её имя. */
-    suspend fun addStage(name: String): String {
-        val clean = name.trim()
-        db.withTransaction {
-            val list = programDao.getStages()
-            if (list.none { it.name.equals(clean, ignoreCase = true) }) {
-                programDao.insertStages(listOf(StageEntity(name = clean, position = (list.maxOfOrNull { it.position } ?: -1) + 1)))
-            }
-        }
-        return clean
-    }
-
     // ---------------- Первый запуск ----------------
 
     data class SetupDraft(val exerciseId: Long, val stage: String?, val weightKg: Float, val calibrate: Boolean)
@@ -445,10 +475,14 @@ class WorkoutRepository(private val db: AppDatabase) {
             programDao.clearDays()
             programDao.clearStages()
             programDao.clearArchive()
-            programDao.insertStages(data.stages.ifEmpty { DefaultTemplate.builtInStages() })
+            // Справочники стадий встроенные (свои варианты убраны) — всегда актуальные
+            programDao.insertStages(DefaultTemplate.builtInStages())
             programDao.insertArchives(data.stageArchive)
             programDao.insertDays(data.days)
-            programDao.insertExercises(data.exercises)
+            // Старые бэкапы без групп стадий — группа по названию упражнения
+            programDao.insertExercises(
+                data.exercises.map { e -> if (e.stageGroup == null) e.copy(stageGroup = StageGroups.groupForName(e.name)) else e },
+            )
             sessionDao.insertSessions(data.sessions)
             sessionDao.insertSets(data.sets)
             settingsDao.upsert(

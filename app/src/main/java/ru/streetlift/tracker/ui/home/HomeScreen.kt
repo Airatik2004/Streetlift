@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
@@ -54,6 +55,8 @@ import ru.streetlift.tracker.data.db.SessionEntity
 import ru.streetlift.tracker.data.db.SettingsEntity
 import ru.streetlift.tracker.data.repo.WorkoutRepository
 import ru.streetlift.tracker.domain.Fmt
+import ru.streetlift.tracker.domain.PeakPhase
+import ru.streetlift.tracker.domain.Peaking
 import ru.streetlift.tracker.domain.ProgressionEngine
 import ru.streetlift.tracker.domain.SessionPlan
 import ru.streetlift.tracker.ui.common.Tag
@@ -65,7 +68,8 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-data class ExercisePreview(val exercise: ExerciseEntity, val plan: SessionPlan)
+/** plan == null — упражнение в этот день пропускается (подводка). */
+data class ExercisePreview(val exercise: ExerciseEntity, val plan: SessionPlan?)
 
 data class HomeUiState(
     val loading: Boolean = true,
@@ -78,6 +82,10 @@ data class HomeUiState(
     val activeSession: SessionEntity? = null,
     val lastFinished: SessionEntity? = null,
     val showWeightsHint: Boolean = false,
+    /** Подводка: фаза на день следующей тренировки, дней до старта, все упражнения для выбора. */
+    val phase: PeakPhase = PeakPhase.NONE,
+    val daysToStart: Long? = null,
+    val allExercises: List<ExerciseEntity> = emptyList(),
 )
 
 class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
@@ -87,11 +95,16 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
     ) { s, days, exs, active, last ->
         val idx = if (days.isEmpty()) 0 else s.currentDayIndex.coerceIn(0, days.size - 1)
         val day = days.getOrNull(idx)
-        val global = ProgressionEngine.isGlobalDeload(s.cycleInMeso, s.deloadEvery, s.deloadOverride)
+        val today = LocalDate.now().toEpochDay()
+        val workoutDay = maxOf(today, s.nextWorkoutEpochDay ?: today)
+        val phase = Peaking.phaseOn(s.peakEpochDay, workoutDay)
+        val global = ProgressionEngine.isGlobalDeload(s.cycleInMeso, s.deloadEvery, s.deloadOverride) && phase == PeakPhase.NONE
+        val peakIds = s.peakIds
         val previews = if (day == null) emptyList() else exs
             .filter { it.dayId == day.id }
             .sortedBy { it.position }
-            .map { ExercisePreview(it, ProgressionEngine.sessionPlan(it.toConfig(), it.toState(), global)) }
+            .map { ExercisePreview(it, Peaking.resolve(it.toConfig(), it.toState(), it.type, global, phase, it.id in peakIds, s.bodyWeightKg)) }
+        val dayOrder = days.associate { it.id to it.position }
         HomeUiState(
             loading = false,
             settings = s,
@@ -103,6 +116,9 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
             activeSession = active,
             lastFinished = last,
             showWeightsHint = false,
+            phase = phase,
+            daysToStart = s.peakEpochDay?.let { it - today },
+            allExercises = exs.sortedWith(compareBy({ dayOrder[it.dayId] ?: 0 }, { it.position })),
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
@@ -117,6 +133,12 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
     fun prepone() = viewModelScope.launch { repo.prepone() }
     fun undoSkip() = viewModelScope.launch { repo.undoSkip() }
     fun setDeload(want: Boolean) = viewModelScope.launch { repo.setDeload(want) }
+    fun setPeak(epochDay: Long, ids: Set<Long>, bw: Float?) = viewModelScope.launch { repo.setPeak(epochDay, ids, bw) }
+    fun clearPeak() = viewModelScope.launch { repo.clearPeak() }
+
+    init {
+        viewModelScope.launch { repo.checkPeakExpired() }
+    }
 }
 
 private val ruLocale: Locale = Locale.forLanguageTag("ru")
@@ -141,6 +163,21 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
     val vm: HomeViewModel = viewModel(factory = viewModelFactory { initializer { HomeViewModel(repo) } })
     val ui by vm.state.collectAsStateWithLifecycle()
     var dayMenu by remember { mutableStateOf(false) }
+    var peakDialog by remember { mutableStateOf(false) }
+    if (peakDialog) {
+        PeakDialog(
+            initialDay = ui.settings.peakEpochDay ?: (LocalDate.now().toEpochDay() + 21),
+            initialIds = ui.settings.peakIds,
+            initialBodyWeight = ui.settings.bodyWeightKg,
+            exercises = ui.allExercises,
+            dayNames = ui.days.associate { it.id to it.name },
+            onDismiss = { peakDialog = false },
+            onSave = { d, ids, bw ->
+                peakDialog = false
+                vm.setPeak(d, ids, bw)
+            },
+        )
+    }
     val s = ui.settings
 
     LazyColumn(
@@ -157,6 +194,15 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+
+        // --- Подводка к старту ---
+        item {
+            PeakCard(
+                ui = ui,
+                onEdit = { peakDialog = true },
+                onClear = { vm.clearPeak() },
+            )
         }
 
         // --- Статус мезоцикла и разгрузки ---
@@ -249,9 +295,17 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
                             Text("В этом дне пока нет упражнений — добавьте их во вкладке «Цикл».")
                         }
 
+                        if (ui.phase == PeakPhase.REST) {
+                            Tag("Полный отдых перед стартом", DeloadGreen)
+                            Text(
+                                "Если всё же тренироваться — лёгкий тонус пиковых упражнений.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         Button(
                             onClick = { vm.start(onOpenWorkout) },
-                            enabled = ui.previews.isNotEmpty() && ui.activeSession == null,
+                            enabled = ui.previews.any { it.plan != null } && ui.activeSession == null,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Icon(Icons.Filled.PlayArrow, contentDescription = null)
@@ -326,10 +380,18 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
 private fun PreviewRow(p: ExercisePreview) {
     val e = p.exercise
     val plan = p.plan
+    if (plan == null) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(e.name, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            Tag("Пропуск · подводка", MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        return
+    }
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(e.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             when {
+                plan.isPeakTarget -> Tag("Пик", MaterialTheme.colorScheme.primary)
                 plan.isCalibration -> Tag("Калибровка", MaterialTheme.colorScheme.secondary)
                 plan.isEmergencyDeload -> Tag("Авар. разгрузка", WarnOrange)
                 plan.isDeload -> Tag("Разгрузка", DeloadGreen)
@@ -337,6 +399,9 @@ private fun PreviewRow(p: ExercisePreview) {
         }
         e.leverageStage?.let {
             Text("Стадия: $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+        }
+        if (e.stageCeiling) {
+            Tag("Потолок стадии достигнут — можно переходить на следующую стадию в редакторе цикла", WarnOrange)
         }
         if (plan.isCalibration) {
             Text(
@@ -371,4 +436,136 @@ fun plural(n: Int, one: String, few: String, many: String): String {
         m10 in 2..4 -> few
         else -> many
     }
+}
+
+private val peakDateFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.forLanguageTag("ru"))
+
+@Composable
+private fun PeakCard(ui: HomeUiState, onEdit: () -> Unit, onClear: () -> Unit) {
+    val s = ui.settings
+    val date = s.peakEpochDay
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Подводка к старту", style = MaterialTheme.typography.titleMedium)
+            if (date == null) {
+                Text(
+                    "Выберите дату старта/проходки и упражнения для выхода на пик — за 22 дня план перестроится сам.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedButton(onClick = onEdit) { Text("Настроить подводку") }
+            } else {
+                val days = ui.daysToStart ?: 0
+                Text(
+                    "Старт: ${LocalDate.ofEpochDay(date).format(peakDateFmt)} · " +
+                        if (days == 0L) "сегодня" else "через $days ${plural(days.toInt(), "день", "дня", "дней")}",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Tag(
+                    if (ui.phase == PeakPhase.NONE) "Обычный цикл — подводка начнётся за 22 дня" else ui.phase.title,
+                    if (ui.phase == PeakPhase.REST) DeloadGreen else MaterialTheme.colorScheme.primary,
+                )
+                val names = ui.allExercises.filter { it.id in s.peakIds }.map { it.name }
+                Text(
+                    if (names.isEmpty()) "Пиковые упражнения не выбраны" else "Пик: " + names.joinToString(", "),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onEdit) { Text("Изменить") }
+                    TextButton(onClick = onClear) { Text("Сбросить") }
+                }
+            }
+        }
+    }
+}
+
+/** Дата старта + чекбоксы пиковых упражнений. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun PeakDialog(
+    initialDay: Long,
+    initialIds: Set<Long>,
+    initialBodyWeight: Float?,
+    exercises: List<ExerciseEntity>,
+    dayNames: Map<Long, String>,
+    onDismiss: () -> Unit,
+    onSave: (Long, Set<Long>, Float?) -> Unit,
+) {
+    var day by remember { mutableStateOf(initialDay) }
+    var bw by remember { mutableStateOf(initialBodyWeight?.let { Fmt.step(it) } ?: "") }
+    var ids by remember { mutableStateOf(initialIds) }
+    var picking by remember { mutableStateOf(false) }
+
+    if (picking) {
+        val state = androidx.compose.material3.rememberDatePickerState(initialSelectedDateMillis = day * 86_400_000L)
+        androidx.compose.material3.DatePickerDialog(
+            onDismissRequest = { picking = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    state.selectedDateMillis?.let { day = it / 86_400_000L }
+                    picking = false
+                }) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { picking = false }) { Text("Отмена") } },
+        ) { androidx.compose.material3.DatePicker(state = state) }
+        return
+    }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Подводка к старту") },
+        text = {
+            Column(
+                Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                OutlinedButton(onClick = { picking = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Дата старта: " + LocalDate.ofEpochDay(day).format(peakDateFmt))
+                }
+                androidx.compose.material3.OutlinedTextField(
+                    value = bw,
+                    onValueChange = { bw = it },
+                    label = { Text("Свой вес, кг") },
+                    supportingText = { Text("для «~85%» от полной нагрузки (свой вес ± отягощение)") },
+                    singleLine = true,
+                    isError = bw.isNotBlank() && bw.replace(',', '.').toFloatOrNull() == null,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "Упражнения для выхода на пик (остальные — фоновые):",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                var lastDay: Long? = null
+                exercises.forEach { e ->
+                    if (e.dayId != lastDay) {
+                        lastDay = e.dayId
+                        Text(
+                            dayNames[e.dayId].orEmpty(),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.Checkbox(
+                            checked = e.id in ids,
+                            onCheckedChange = { on -> ids = if (on) ids + e.id else ids - e.id },
+                        )
+                        Text(e.name, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(day, ids, bw.replace(',', '.').toFloatOrNull()?.takeIf { it > 0f }) },
+                enabled = day >= LocalDate.now().toEpochDay(),
+            ) { Text("Сохранить") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
 }

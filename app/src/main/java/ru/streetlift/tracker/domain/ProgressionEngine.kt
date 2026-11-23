@@ -33,11 +33,15 @@ data class PlanState(
     val lastScoreWeight: Float? = null,
     /** ACTIVE — двойная прогрессия; CALIBRATION — круг подбора стартовых веса/повторов. */
     val mode: ExerciseMode = ExerciseMode.ACTIVE,
+    /** Сколько кругов подряд закрыт потолок maxSets × maxReps на неконечной стадии. */
+    val ceilingStreak: Int = 0,
+    /** Потолок стадии достигнут — пора на следующую стадию. */
+    val stageCeiling: Boolean = false,
 )
 
 data class SetResult(val weightKg: Float, val reps: Int, val rir: Int)
 
-enum class Decision { NOT_PERFORMED, INCREASE_WEIGHT, ADD_VOLUME, HOLD, REDUCE_VOLUME, DELOAD_DONE, CALIBRATED }
+enum class Decision { NOT_PERFORMED, INCREASE_WEIGHT, ADD_VOLUME, HOLD, REDUCE_VOLUME, DELOAD_DONE, CALIBRATED, STAGE_CEILING }
 
 data class ProgressionResult(
     val state: PlanState,
@@ -58,6 +62,9 @@ data class SessionPlan(
     val isDeload: Boolean,
     val isEmergencyDeload: Boolean,
     val isCalibration: Boolean = false,
+    val peakPhase: PeakPhase = PeakPhase.NONE,
+    /** Упражнение выбрано для выхода на пик. */
+    val isPeakTarget: Boolean = false,
 )
 
 data class CycleState(
@@ -170,6 +177,8 @@ object ProgressionEngine {
         state: PlanState,
         sets: List<SetResult>,
         wasDeload: Boolean,
+        /** Есть стадии, текущая не финальная и вес ≥ 0 — вес не растёт, подсказываем сменить стадию. */
+        stageCeilingEligible: Boolean = false,
     ): ProgressionResult {
         if (sets.isEmpty()) {
             return ProgressionResult(state, Decision.NOT_PERFORMED, false, "не выполнялось — план без изменений")
@@ -220,7 +229,37 @@ object ProgressionEngine {
         val decision: Decision
         val msg: String
 
+        val atCeiling = allMax && !fatigue && stageCeilingEligible
         when {
+            atCeiling && sets.size < config.maxSets -> {
+                // Сначала выходим на полный объём maxSets × maxReps, вес не трогаем
+                next = state.copy(
+                    weightKg = work, plannedSets = config.maxSets, targetReps = config.maxReps,
+                    roundsAtWeight = state.roundsAtWeight + 1, declineStreak = 0, emergencyDeloadNext = false,
+                    lastScore = score, lastScoreWeight = work, ceilingStreak = 0, stageCeiling = false,
+                )
+                decision = Decision.ADD_VOLUME
+                emergency = false
+                msg = "все подходы на ${config.maxReps}+ — объём до ${config.maxSets} подходов, вес ${Fmt.weight(work)} (на стадии вес не растёт)"
+            }
+
+            atCeiling -> {
+                val streakNow = state.ceilingStreak + 1
+                val ceiling = streakNow >= 2
+                next = state.copy(
+                    weightKg = work, plannedSets = config.maxSets, targetReps = config.maxReps,
+                    roundsAtWeight = state.roundsAtWeight + 1, declineStreak = 0, emergencyDeloadNext = false,
+                    lastScore = score, lastScoreWeight = work, ceilingStreak = streakNow, stageCeiling = ceiling,
+                )
+                decision = if (ceiling) Decision.STAGE_CEILING else Decision.HOLD
+                emergency = false
+                msg = if (ceiling) {
+                    "потолок стадии достигнут — можно переходить на следующую стадию в редакторе цикла"
+                } else {
+                    "${config.maxSets} × ${config.maxReps} закрыто (1 из 2 кругов до потолка стадии), вес ${Fmt.weight(work)}"
+                }
+            }
+
             allMax && !fatigue -> {
                 val newWeight = roundWeight(work + config.weightStep)
                 next = PlanState(
@@ -246,6 +285,8 @@ object ProgressionEngine {
                     emergencyDeloadNext = emergency,
                     lastScore = score,
                     lastScoreWeight = work,
+                    ceilingStreak = 0,
+                    stageCeiling = false,
                 )
                 decision = Decision.REDUCE_VOLUME
                 val why = if (belowMin) "повторы ниже ${config.minReps}" else "RIR 0 в $zeroRir подходах"
@@ -270,6 +311,8 @@ object ProgressionEngine {
                     emergencyDeloadNext = emergency,
                     lastScore = score,
                     lastScoreWeight = work,
+                    ceilingStreak = 0,
+                    stageCeiling = false,
                 )
                 decision = if (newSets > planned) Decision.ADD_VOLUME else Decision.HOLD
                 msg = if (reduced) {
@@ -314,6 +357,8 @@ object ProgressionEngine {
      */
     fun onStageChanged(state: PlanState): PlanState = state.copy(
         mode = ExerciseMode.CALIBRATION,
+        ceilingStreak = 0,
+        stageCeiling = false,
         roundsAtWeight = 0,
         declineStreak = 0,
         emergencyDeloadNext = false,

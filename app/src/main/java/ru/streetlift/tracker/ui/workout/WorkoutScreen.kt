@@ -167,6 +167,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                 )
             }
             if (ui.isDeload) Tag("Разгрузка", DeloadGreen)
+            ui.peakTitle?.let { Tag(it) }
             Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Меню") }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -210,7 +211,6 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                         onWeight = { weight = it }, onReps = { reps = it }, onRir = { rir = it },
                         onSets = { ActiveWorkout.changeSets(cur.exercise.id, it) },
                         onStage = { vm.setStage(cur.exercise.id, it) },
-                        onAddStage = { vm.addStage(it) },
                     )
                 }
             }
@@ -391,7 +391,6 @@ private fun WorkPanel(
     onRir: (Int) -> Unit,
     onSets: (Int) -> Unit,
     onStage: (String?) -> Unit,
-    onAddStage: (String) -> Unit,
 ) {
     val cur = ui.current ?: return
     val plan = cur.plan
@@ -439,14 +438,14 @@ private fun WorkPanel(
         textAlign = TextAlign.Center,
     )
     if (plan.isEmergencyDeload) Tag("Аварийная разгрузка упражнения", WarnOrange)
+    if (plan.isPeakTarget) Tag("Пиковое упражнение")
     Spacer(Modifier.height(8.dp))
 
-    if (plan.isCalibration && (cur.exercise.leverageStage != null || ui.currentStage != null)) {
+    if (plan.isCalibration && cur.exercise.stageGroup != null) {
         StagePicker(
-            stages = ui.stages,
+            stages = ui.stages.filter { it.groupKey == cur.exercise.stageGroup },
             selected = ui.currentStage,
             onSelect = onStage,
-            onAddCustom = onAddStage,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(8.dp))

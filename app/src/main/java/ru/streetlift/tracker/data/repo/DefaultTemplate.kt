@@ -5,7 +5,7 @@ import ru.streetlift.tracker.data.db.ExerciseEntity
 import ru.streetlift.tracker.data.db.ProgramDao
 import ru.streetlift.tracker.data.db.StageEntity
 import ru.streetlift.tracker.domain.ExerciseType
-import ru.streetlift.tracker.domain.LeverageStages
+import ru.streetlift.tracker.domain.StageGroups
 import ru.streetlift.tracker.domain.ExerciseType.ACCESSORY
 import ru.streetlift.tracker.domain.ExerciseType.EXPLOSIVE
 import ru.streetlift.tracker.domain.ExerciseType.HEAVY_LEVER
@@ -21,7 +21,7 @@ object DefaultTemplate {
         val reps: IntRange,
         val rir: IntRange,
         val step: Float,
-        val stage: String? = null,
+        val group: String? = null,
     )
 
     private data class Day(val name: String, val alternating: Boolean, val exercises: List<Ex>)
@@ -37,7 +37,7 @@ object DefaultTemplate {
         Day(
             "День 2 · Горизонт + 1 рука", false,
             listOf(
-                Ex("Отжимания в горизонте", HEAVY_LEVER, 3..4, 5..8, 1..2, 2.5f, LeverageStages.DEFAULT),
+                Ex("Отжимания в горизонте", HEAVY_LEVER, 3..4, 5..8, 1..2, 2.5f, StageGroups.LEVER),
                 Ex("Подтягивания на 1 руке", HEAVY_LEVER, 3..4, 3..6, 1..2, 2.5f),
             ),
         ),
@@ -52,14 +52,16 @@ object DefaultTemplate {
         Day(
             "День 4 · Стойка + передний вис", false,
             listOf(
-                Ex("Отжимания в стойке на руках", HEAVY_LEVER, 4..5, 6..10, 1..2, 2.5f),
-                Ex("Подтягивания в переднем висе", HEAVY_LEVER, 4..4, 5..8, 1..2, 2.5f, LeverageStages.DEFAULT),
+                Ex("Отжимания в стойке на руках", HEAVY_LEVER, 4..5, 6..10, 1..2, 2.5f, StageGroups.HANDSTAND),
+                Ex("Подтягивания в переднем висе", HEAVY_LEVER, 4..4, 5..8, 1..2, 2.5f, StageGroups.LEVER),
             ),
         ),
     )
 
-    fun builtInStages(): List<StageEntity> = LeverageStages.builtIn.mapIndexed { i, st ->
-        StageEntity(name = st.name, description = st.description, position = i, builtIn = true)
+    fun builtInStages(): List<StageEntity> = StageGroups.lists.flatMap { (group, list) ->
+        list.mapIndexed { i, st ->
+            StageEntity(name = st.name, description = st.description, position = i, builtIn = true, groupKey = group)
+        }
     }
 
     suspend fun seedProgram(dao: ProgramDao) {
@@ -82,7 +84,8 @@ object DefaultTemplate {
                         weightKg = 0f,
                         plannedSets = e.sets.first,
                         targetReps = e.reps.first,
-                        leverageStage = e.stage,
+                        leverageStage = e.group?.let { StageGroups.defaultFor(it) },
+                        stageGroup = e.group,
                     ),
                 )
             }

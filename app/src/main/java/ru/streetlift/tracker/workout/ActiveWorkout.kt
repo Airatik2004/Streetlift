@@ -14,6 +14,8 @@ import kotlinx.coroutines.launch
 import ru.streetlift.tracker.StreetLiftApp
 import ru.streetlift.tracker.data.db.SetLogEntity
 import ru.streetlift.tracker.data.repo.WorkoutRepository
+import ru.streetlift.tracker.domain.PeakPhase
+import ru.streetlift.tracker.domain.Peaking
 import ru.streetlift.tracker.domain.ProgressionEngine
 import ru.streetlift.tracker.timer.RestTimer
 import ru.streetlift.tracker.timer.TimerActions
@@ -69,10 +71,15 @@ object ActiveWorkout {
                 _missing.value = session == null
                 return@launch
             }
-            val exercises = session.dayId?.let { repo.getExercisesForDay(it) } ?: emptyList()
-            val plans = exercises.associate {
-                it.id to ProgressionEngine.sessionPlan(it.toConfig(), it.toState(), session.isDeload)
-            }
+            val all = session.dayId?.let { repo.getExercisesForDay(it) } ?: emptyList()
+            // Подводка: у пиковых/фоновых свой план, часть упражнений пропускается
+            val bodyWeight = repo.getSettings().bodyWeightKg
+            val phase = session.peakPhase?.let { runCatching { PeakPhase.valueOf(it) }.getOrNull() } ?: PeakPhase.NONE
+            val peakIds = session.peakIds?.split(',')?.mapNotNull { it.trim().toLongOrNull() }?.toSet().orEmpty()
+            val plans = all.mapNotNull { e ->
+                Peaking.resolve(e.toConfig(), e.toState(), e.type, session.isDeload, phase, e.id in peakIds, bodyWeight)?.let { e.id to it }
+            }.toMap()
+            val exercises = all.filter { it.id in plans }
             val own = owner(sessionId)
             TimerService.ensureRunning(app)
             combine(repo.observeSets(sessionId), extra, prefill, RestTimer.state) { logs, ex, pf, timer ->

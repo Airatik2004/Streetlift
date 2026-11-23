@@ -35,6 +35,8 @@ data class WorkoutUi(
     val rows: List<StepRow> = emptyList(),
     val currentRow: Int = 0,
     val canUndo: Boolean = false,
+    /** Фаза подводки («Предпик», «Тейпер 1»…) или null. */
+    val peakTitle: String? = null,
 )
 
 /** Экран — лишь вид на [ActiveWorkout]: та же логика работает из уведомления. */
@@ -73,6 +75,9 @@ class WorkoutViewModel(
                 rows = r.rows,
                 currentRow = r.currentRow,
                 canUndo = r.canUndo,
+                peakTitle = r.session.peakPhase?.let {
+                    runCatching { ru.streetlift.tracker.domain.PeakPhase.valueOf(it).title }.getOrNull()
+                },
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WorkoutUi())
@@ -80,10 +85,6 @@ class WorkoutViewModel(
     fun setStage(exerciseId: Long, stage: String?) =
         stageDraft.update { it + (exerciseId to stage) }
 
-    fun addStage(name: String) = viewModelScope.launch {
-        val added = repo.addStage(name)
-        ui.value.current?.exercise?.id?.let { setStage(it, added) }
-    }
 
     fun finish(onDone: (String) -> Unit) = viewModelScope.launch {
         val s = repo.finishSession(sessionId)

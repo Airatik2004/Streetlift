@@ -32,7 +32,14 @@ data class SettingsEntity(
     val undoCompletedRounds: Int? = null,
     val undoOverride: String? = null,
     val undoNextEpochDay: Long? = null,
+    /** Подводка к старту: дата старта (epochDay) и id пиковых упражнений через запятую. */
+    val peakEpochDay: Long? = null,
+    val peakExerciseIds: String = "",
+    /** Свой вес — для «~85%» от полной нагрузки в подводке. */
+    val bodyWeightKg: Float? = null,
 ) {
+    val peakIds: Set<Long> get() = peakExerciseIds.split(',').mapNotNull { it.trim().toLongOrNull() }.toSet()
+
     val canUndoSkip: Boolean get() = undoDayIndex != null
 }
 
@@ -83,6 +90,11 @@ data class ExerciseEntity(
     /** Текущая стадия рычага (горизонт, передний вис); null — не рычаговое упражнение. */
     val leverageStage: String? = null,
     val mode: ExerciseMode = ExerciseMode.ACTIVE,
+    /** Группа справочника стадий (StageGroups.LEVER / HANDSTAND); null — у упражнения нет стадий. */
+    val stageGroup: String? = null,
+    val ceilingStreak: Int = 0,
+    /** Потолок стадии достигнут — подсказать переход на следующую стадию. */
+    val stageCeiling: Boolean = false,
 ) {
     fun toConfig() = ExerciseConfig(minSets, maxSets, minReps, maxReps, targetRirMin, targetRirMax, weightStep)
 
@@ -96,7 +108,14 @@ data class ExerciseEntity(
         lastScore = lastScore,
         lastScoreWeight = lastScoreWeight,
         mode = mode,
+        ceilingStreak = ceilingStreak,
+        stageCeiling = stageCeiling,
     )
+
+    /** Стадия не финальная и вес ≥ 0 — вес не растёт, подсказываем сменить стадию. */
+    val stageCeilingEligible: Boolean
+        get() = stageGroup != null && leverageStage != null &&
+            leverageStage != ru.streetlift.tracker.domain.StageGroups.finalOf(stageGroup) && weightKg >= 0f
 
     fun withState(s: PlanState) = copy(
         weightKg = s.weightKg,
@@ -108,6 +127,8 @@ data class ExerciseEntity(
         lastScore = s.lastScore,
         lastScoreWeight = s.lastScoreWeight,
         mode = s.mode,
+        ceilingStreak = s.ceilingStreak,
+        stageCeiling = s.stageCeiling,
     )
 }
 
@@ -123,6 +144,9 @@ data class SessionEntity(
     val isDeload: Boolean,
     val alternating: Boolean,
     val summary: String = "",
+    /** Фаза подводки на момент тренировки (PeakPhase.name) и пиковые упражнения. */
+    val peakPhase: String? = null,
+    val peakIds: String? = null,
     /** JSON-снимок цикла и плана до завершения — для отката при удалении последней тренировки. */
     val rollback: String? = null,
 )
@@ -164,6 +188,8 @@ data class StageEntity(
     val description: String = "",
     val position: Int,
     val builtIn: Boolean = false,
+    /** Группа справочника: у каждого упражнения свой список стадий. */
+    val groupKey: String = ru.streetlift.tracker.domain.StageGroups.LEVER,
 )
 
 /** Снимок плана упражнения на старой стадии при переходе на новую. */

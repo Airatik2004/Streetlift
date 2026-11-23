@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         StageEntity::class,
         StageArchiveEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {

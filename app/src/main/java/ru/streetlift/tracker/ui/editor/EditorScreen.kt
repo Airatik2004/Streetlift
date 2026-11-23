@@ -71,7 +71,6 @@ class EditorViewModel(private val repo: WorkoutRepository) : ViewModel() {
     fun setAutoStart(b: Boolean) = viewModelScope.launch { repo.setAutoStartTimer(b) }
     fun resetProgram() = viewModelScope.launch { repo.resetProgram() }
     fun reopenSetup() = viewModelScope.launch { repo.reopenSetup() }
-    fun addStage(name: String, onAdded: (String) -> Unit) = viewModelScope.launch { onAdded(repo.addStage(name)) }
 }
 
 /**
@@ -147,6 +146,9 @@ fun EditorScreen(repo: WorkoutRepository) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             e.leverageStage?.let { Text("Стадия: $it", style = MaterialTheme.typography.bodySmall) }
+                            if (e.stageCeiling) {
+                                Tag("Потолок стадии достигнут — можно переходить на следующую стадию", ru.streetlift.tracker.ui.theme.WarnOrange)
+                            }
                             if (e.mode != ExerciseMode.CALIBRATION) {
                                 Text(
                                     "Сейчас: ${Fmt.weight(e.weightKg)}, ${e.plannedSets} подх., цель ${e.targetReps}+" +
@@ -214,8 +216,7 @@ fun EditorScreen(repo: WorkoutRepository) {
     editExercise?.let { e ->
         CalibrationDialog(
             exercise = e,
-            stages = ui.stages,
-            onAddStage = { name, cb -> vm.addStage(name, cb) },
+            stages = ui.stages.filter { it.groupKey == e.stageGroup },
             onDismiss = { editExercise = null },
             onSave = {
                 vm.saveExercise(it)
@@ -230,7 +231,6 @@ fun EditorScreen(repo: WorkoutRepository) {
 private fun CalibrationDialog(
     exercise: ExerciseEntity,
     stages: List<StageEntity>,
-    onAddStage: (String, (String) -> Unit) -> Unit,
     onDismiss: () -> Unit,
     onSave: (ExerciseEntity) -> Unit,
 ) {
@@ -259,12 +259,11 @@ private fun CalibrationDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (exercise.leverageStage != null) {
+                if (exercise.stageGroup != null) {
                     StagePicker(
                         stages = stages,
                         selected = stage,
                         onSelect = { if (it != null) stage = it },
-                        onAddCustom = { n -> onAddStage(n) { added -> stage = added } },
                         modifier = Modifier.fillMaxWidth(),
                     )
                     if (stageChanged) {

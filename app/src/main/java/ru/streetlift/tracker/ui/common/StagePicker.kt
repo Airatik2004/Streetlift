@@ -22,21 +22,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import ru.streetlift.tracker.data.db.StageEntity
 
 /**
- * Выбор стадии рычага из упорядоченного справочника + «Свой вариант…».
- * allowNone — можно убрать стадию (упражнение без рычага).
+ * Выбор стадии из упорядоченного справочника этого упражнения (список приходит уже отфильтрованным).
+ * allowNone — можно убрать стадию.
  */
 @Composable
 fun StagePicker(
     stages: List<StageEntity>,
     selected: String?,
     onSelect: (String?) -> Unit,
-    onAddCustom: (String) -> Unit,
     modifier: Modifier = Modifier,
     allowNone: Boolean = false,
     label: String = "Стадия рычага",
 ) {
     var open by remember { mutableStateOf(false) }
-    var addDialog by remember { mutableStateOf(false) }
 
     Box(modifier) {
         OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) {
@@ -74,24 +72,6 @@ fun StagePicker(
                     },
                 )
             }
-            HorizontalDivider()
-            DropdownMenuItem(text = { Text("＋ Свой вариант…") }, onClick = {
-                open = false
-                addDialog = true
-            })
         }
-    }
-
-    if (addDialog) {
-        TextInputDialog(
-            title = "Своя стадия",
-            initial = "",
-            hint = "Добавится в конец списка стадий",
-            onDismiss = { addDialog = false },
-            onConfirm = { t ->
-                addDialog = false
-                if (t.isNotBlank()) onAddCustom(t.trim())
-            },
-        )
     }
 }

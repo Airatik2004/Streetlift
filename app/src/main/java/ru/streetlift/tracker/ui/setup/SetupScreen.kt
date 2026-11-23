@@ -59,7 +59,6 @@ class SetupViewModel(private val repo: WorkoutRepository) : ViewModel() {
         SetupUi(d, e, s)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SetupUi())
 
-    fun addStage(name: String, onAdded: (String) -> Unit) = viewModelScope.launch { onAdded(repo.addStage(name)) }
 
     fun save(drafts: List<WorkoutRepository.SetupDraft>) = viewModelScope.launch { repo.completeSetup(drafts) }
 }
@@ -121,12 +120,11 @@ fun SetupScreen(repo: WorkoutRepository) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    if (e.leverageStage != null || d.stage != null) {
+                    if (e.stageGroup != null) {
                         StagePicker(
-                            stages = ui.stages,
+                            stages = ui.stages.filter { it.groupKey == e.stageGroup },
                             selected = d.stage,
                             onSelect = { drafts[e.id] = d.copy(stage = it) },
-                            onAddCustom = { name -> vm.addStage(name) { added -> drafts[e.id] = d.copy(stage = added) } },
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }

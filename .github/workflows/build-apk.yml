@@ -78,7 +78,9 @@ jobs:
         run: |
           cp app/build/outputs/apk/release/app-release.apk streetlift.apk
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest streetlift.apk \
+          gh release create latest streetlift.apk --target "$GITHUB_SHA" \
             --title "Тренировки — сборка ${{ github.run_number }}" \
             --notes "Автосборка из ${GITHUB_SHA::7}. Прямая ссылка: https://github.com/${{ github.repository }}/releases/latest/download/streetlift.apk" \
             --latest
+          # Иногда релиз остаётся черновиком — публикуем явно, иначе прямая ссылка не работает
+          gh release edit latest --draft=false --latest

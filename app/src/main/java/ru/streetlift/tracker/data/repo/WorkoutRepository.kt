@@ -78,8 +78,13 @@ class WorkoutRepository(private val db: AppDatabase) {
     }
 
     /** Напоминания: накануне и в день тренировки (минуты от полуночи). */
-    suspend fun setReminders(eve: Boolean, eveMin: Int, day: Boolean, dayMin: Int) {
-        settingsDao.upsert(getSettings().copy(remindEve = eve, remindEveMin = eveMin, remindDay = day, remindDayMin = dayMin))
+    suspend fun setReminders(eve: Boolean, eveMin: Int, day: Boolean, dayMin: Int, late: Boolean, lateMin: Int) {
+        settingsDao.upsert(
+            getSettings().copy(
+                remindEve = eve, remindEveMin = eveMin, remindDay = day, remindDayMin = dayMin,
+                remindLate = late, remindLateMin = lateMin,
+            ),
+        )
     }
 
     /** Сохранить набор резин (название + помощь в кг). */

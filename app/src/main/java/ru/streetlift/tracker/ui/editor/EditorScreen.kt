@@ -76,8 +76,8 @@ class EditorViewModel(private val repo: WorkoutRepository) : ViewModel() {
     fun setDeloadEvery(n: Int) = viewModelScope.launch { repo.setDeloadEvery(n) }
     fun setDeload(want: Boolean) = viewModelScope.launch { repo.setDeload(want) }
     fun setBands(b: List<ru.streetlift.tracker.domain.Band>) = viewModelScope.launch { repo.setBands(b) }
-    fun setReminders(eve: Boolean, eveMin: Int, day: Boolean, dayMin: Int) =
-        viewModelScope.launch { repo.setReminders(eve, eveMin, day, dayMin) }
+    fun setReminders(s: SettingsEntity) =
+        viewModelScope.launch { repo.setReminders(s.remindEve, s.remindEveMin, s.remindDay, s.remindDayMin, s.remindLate, s.remindLateMin) }
     fun setPriority(m: ru.streetlift.tracker.domain.PriorityMode) = viewModelScope.launch { repo.setPriorityMode(m) }
     fun setAutoStart(b: Boolean) = viewModelScope.launch { repo.setAutoStartTimer(b) }
     fun resetProgram() = viewModelScope.launch { repo.resetProgram() }
@@ -203,7 +203,7 @@ fun EditorScreen(repo: WorkoutRepository) {
                         )
                     }
                     HorizontalDivider()
-                    ReminderSettings(s) { e, em, d, dm -> vm.setReminders(e, em, d, dm) }
+                    ReminderSettings(s) { vm.setReminders(it) }
                     HorizontalDivider()
                     Row(
                         Modifier.fillMaxWidth().clickable { editBands = true },
@@ -450,9 +450,9 @@ private fun BandsDialog(
     )
 }
 
-/** Напоминания о тренировке: накануне и в день; время — по нажатию; разрешение на точное время. */
+/** Напоминания о тренировке: накануне, в день и вечером, если не сделана; время — по нажатию. */
 @Composable
-private fun ReminderSettings(s: SettingsEntity, onChange: (Boolean, Int, Boolean, Int) -> Unit) {
+private fun ReminderSettings(s: SettingsEntity, onChange: (SettingsEntity) -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var exact by remember { mutableStateOf(ru.streetlift.tracker.reminder.Reminders.canExact(ctx)) }
     androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
@@ -463,25 +463,26 @@ private fun ReminderSettings(s: SettingsEntity, onChange: (Boolean, Int, Boolean
     fun pick(current: Int, set: (Int) -> Unit) {
         android.app.TimePickerDialog(ctx, { _, h, m -> set(h * 60 + m) }, current / 60, current % 60, true).show()
     }
+    @Composable
+    fun Item(title: String, sub: String, on: Boolean, minutes: Int, onToggle: (Boolean) -> Unit, onTime: (Int) -> Unit) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).clickable { pick(minutes, onTime) }) {
+                Text("$title · ${hm(minutes)}", style = MaterialTheme.typography.bodyMedium)
+                Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = on, onCheckedChange = onToggle)
+        }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("Напоминания", style = MaterialTheme.typography.titleMedium)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f).clickable { pick(s.remindEveMin) { onChange(s.remindEve, it, s.remindDay, s.remindDayMin) } }) {
-                Text("Накануне вечером", style = MaterialTheme.typography.bodyMedium)
-                Text("в ${hm(s.remindEveMin)} — «Завтра тренировка» · нажмите, чтобы изменить время",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Switch(checked = s.remindEve, onCheckedChange = { onChange(it, s.remindEveMin, s.remindDay, s.remindDayMin) })
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f).clickable { pick(s.remindDayMin) { onChange(s.remindEve, s.remindEveMin, s.remindDay, it) } }) {
-                Text("В день тренировки", style = MaterialTheme.typography.bodyMedium)
-                Text("в ${hm(s.remindDayMin)} — «Сегодня тренировка», кнопки «Начать» и «Завтра»",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Switch(checked = s.remindDay, onCheckedChange = { onChange(s.remindEve, s.remindEveMin, it, s.remindDayMin) })
-        }
-        if (!exact && (s.remindEve || s.remindDay)) {
+        Text("Нажмите на строку, чтобы изменить время.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Item("Накануне", "«Завтра тренировка» — если по плану она завтра", s.remindEve, s.remindEveMin,
+            { onChange(s.copy(remindEve = it)) }, { onChange(s.copy(remindEveMin = it)) })
+        Item("В день тренировки", "«Сегодня тренировка», кнопки «Начать» и «Завтра»", s.remindDay, s.remindDayMin,
+            { onChange(s.copy(remindDay = it)) }, { onChange(s.copy(remindDayMin = it)) })
+        Item("Вечером, если не сделана", "«Тренировка сегодня ещё не сделана», «Начать» и «Завтра»", s.remindLate, s.remindLateMin,
+            { onChange(s.copy(remindLate = it)) }, { onChange(s.copy(remindLateMin = it)) })
+        if (!exact && (s.remindEve || s.remindDay || s.remindLate)) {
             Text(
                 "Нет разрешения на точное время — напоминание может прийти с опозданием на несколько минут.",
                 style = MaterialTheme.typography.bodySmall,

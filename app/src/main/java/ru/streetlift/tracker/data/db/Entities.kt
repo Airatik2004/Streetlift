@@ -53,6 +53,9 @@ data class SettingsEntity(
     val remindEveMin: Int = 21 * 60,
     val remindDay: Boolean = true,
     val remindDayMin: Int = 17 * 60,
+    /** Вечером в день тренировки, если она не сделана. */
+    val remindLate: Boolean = true,
+    val remindLateMin: Int = 21 * 60,
     /** День выбран вручную (выбор/пропуск) — автоматический выбор дня на пике не вмешивается. */
     val manualDay: Boolean = false,
 ) {

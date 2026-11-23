@@ -32,6 +32,7 @@ object Reminders {
     const val CHANNEL = "workout_reminders"
     const val KIND_EVE = "eve"
     const val KIND_DAY = "day"
+    const val KIND_LATE = "late"
     private const val EXTRA_KIND = "kind"
     private const val EXTRA_DAY = "day"
     const val ACTION_FIRE = "ru.streetlift.tracker.REMIND"
@@ -59,32 +60,38 @@ object Reminders {
                 .setData(android.net.Uri.parse("package:${context.packageName}"))
         } else null
 
-    /** День, на который ставятся напоминания: запланированный, а если он прошёл без тренировки — завтра. */
-    fun targetDay(s: SettingsEntity, now: LocalDateTime): Long {
-        val today = now.toLocalDate().toEpochDay()
-        val d = maxOf(today, s.nextWorkoutEpochDay ?: today)
-        return if (d == today && now.toLocalTime().toSecondOfDay() / 60 >= s.remindDayMin) today + 1 else d
-    }
-
-    /** Переставить оба напоминания по текущим настройкам. */
+    /**
+     * Переставить напоминания. Дата тренировки — как на Главной: запланированная, а если она
+     * прошла без тренировки — «сегодня» (несделанная тренировка не переносится сама).
+     *  • накануне — только если по плану тренировка действительно завтра;
+     *  • днём и вечером — в день тренировки; если время уже прошло, а тренировка не сделана — завтра.
+     */
     fun reschedule(context: Context, s: SettingsEntity) {
         val am = context.getSystemService(AlarmManager::class.java)
-        val now = LocalDateTime.now()
-        val day = targetDay(s, now)
+        val today = LocalDate.now().toEpochDay()
+        val planned = maxOf(today, s.nextWorkoutEpochDay ?: today)
         val zone = ZoneId.systemDefault()
         fun at(epochDay: Long, minutes: Int): Long =
             LocalDate.ofEpochDay(epochDay).atStartOfDay(zone).plusMinutes(minutes.toLong()).toInstant().toEpochMilli()
         val nowMs = System.currentTimeMillis()
+        // День напоминания в день тренировки: сегодня/план, а если время прошло — завтра (тренировка всё ещё ждёт)
+        fun sameDay(minutes: Int): Long = if (at(planned, minutes) > nowMs) planned else planned + 1
 
-        val eveAt = at(day - 1, s.remindEveMin)
-        val dayAt = at(day, s.remindDayMin)
-        set(context, am, KIND_EVE, day, if (s.remindEve && eveAt > nowMs) eveAt else null)
-        set(context, am, KIND_DAY, day, if (s.remindDay && dayAt > nowMs) dayAt else null)
+        val eveAt = at(planned - 1, s.remindEveMin)
+        set(context, am, KIND_EVE, planned, if (s.remindEve && planned > today && eveAt > nowMs) eveAt else null)
+        val dDay = sameDay(s.remindDayMin)
+        set(context, am, KIND_DAY, dDay, if (s.remindDay) at(dDay, s.remindDayMin) else null)
+        val dLate = sameDay(s.remindLateMin)
+        set(context, am, KIND_LATE, dLate, if (s.remindLate) at(dLate, s.remindLateMin) else null)
     }
 
     @SuppressLint("MissingPermission")
     private fun set(context: Context, am: AlarmManager, kind: String, day: Long, at: Long?) {
-        val code = if (kind == KIND_EVE) 100 else 101
+        val code = when (kind) {
+            KIND_EVE -> 100
+            KIND_DAY -> 101
+            else -> 102
+        }
         val pi = PendingIntent.getBroadcast(
             context, code,
             Intent(context, ReminderReceiver::class.java).setAction(ACTION_FIRE)
@@ -124,9 +131,15 @@ object Reminders {
                   try {
                     val s = repo.getSettings()
                     val today = LocalDate.now().toEpochDay()
-                    // Тренировку уже сделали, перенесли дальше или идёт — не напоминаем
-                    val pending = maxOf(today, s.nextWorkoutEpochDay ?: today) <= day
-                    val enabled = if (kind == KIND_EVE) s.remindEve else s.remindDay
+                    // Дата тренировки как на Главной. Накануне — только если она ровно завтра;
+                    // днём и вечером — если она сегодня (сделали или перенесли — не напоминаем)
+                    val planned = maxOf(today, s.nextWorkoutEpochDay ?: today)
+                    val pending = if (kind == KIND_EVE) planned == today + 1 else planned == today
+                    val enabled = when (kind) {
+                        KIND_EVE -> s.remindEve
+                        KIND_DAY -> s.remindDay
+                        else -> s.remindLate
+                    }
                     if (enabled && pending && !repo.hasActiveSession()) {
                         val dayName = repo.plannedDay()?.name.orEmpty()
                         notify(context, kind, dayName)
@@ -148,13 +161,19 @@ object Reminders {
         )
         val b = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_timer)
-            .setContentTitle(if (kind == KIND_EVE) "Завтра тренировка" else "Сегодня тренировка")
+            .setContentTitle(
+                when (kind) {
+                    KIND_EVE -> "Завтра тренировка"
+                    KIND_DAY -> "Сегодня тренировка"
+                    else -> "Тренировка сегодня ещё не сделана"
+                },
+            )
             .setContentText(dayName)
             .setColor(0xFF2196F3.toInt())
             .setAutoCancel(true)
             .setContentIntent(open)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
-        if (kind == KIND_DAY) {
+        if (kind != KIND_EVE) {
             val start = PendingIntent.getActivity(
                 context, 21,
                 Intent(context, MainActivity::class.java)

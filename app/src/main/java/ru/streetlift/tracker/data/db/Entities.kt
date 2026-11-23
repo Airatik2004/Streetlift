@@ -104,8 +104,13 @@ data class ExerciseEntity(
     val stageCeiling: Boolean = false,
     /** REPS — повторы; SECONDS — статика, minReps..maxReps это секунды. */
     val metric: Metric = Metric.REPS,
+    /** Всегда в конце дня, вне суперсета (задняя дельта). */
+    val alwaysLast: Boolean = false,
 ) {
     val isSeconds: Boolean get() = metric == Metric.SECONDS
+
+    /** Не участвует в суперсете — идёт в конце дня (статика и «всегда последние»). */
+    val outOfSuperset: Boolean get() = isSeconds || alwaysLast
 
     fun toConfig() = ExerciseConfig(minSets, maxSets, minReps, maxReps, targetRirMin, targetRirMax, weightStep, isSeconds)
 

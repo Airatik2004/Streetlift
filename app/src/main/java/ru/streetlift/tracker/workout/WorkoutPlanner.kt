@@ -81,9 +81,9 @@ object WorkoutPlanner {
                 maxCount = maxCount,
             )
         }
-        // Статика всегда в конце дня; чередование — только среди упражнений на повторы
-        val main = blocks.filter { !it.exercise.isSeconds }
-        val tail = blocks.filter { it.exercise.isSeconds }
+        // Статика и задняя дельта — всегда в конце дня, вне суперсета
+        val main = blocks.filter { !it.exercise.outOfSuperset }
+        val tail = blocks.filter { it.exercise.outOfSuperset }
         val alternating = session.alternating && main.size > 1
         val order = buildOrder(main, alternating) + buildOrder(tail, false)
         val byId = blocks.associateBy { it.exercise.id }

@@ -15,6 +15,20 @@ import ru.streetlift.tracker.ui.theme.StreetLiftTheme
 
 class MainActivity : ComponentActivity() {
 
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        handleOpenIntent(intent)
+    }
+
+    /** Из уведомления: открыть экран идущей тренировки. */
+    private fun handleOpenIntent(intent: android.content.Intent?) {
+        val id = intent?.getLongExtra(NavRequests.EXTRA_OPEN_SESSION, -1L) ?: -1L
+        if (id > 0) {
+            NavRequests.openWorkout.value = id
+            intent?.removeExtra(NavRequests.EXTRA_OPEN_SESSION)
+        }
+    }
+
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
@@ -29,6 +43,7 @@ class MainActivity : ComponentActivity() {
         ) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+        handleOpenIntent(intent)
         val repo = (application as StreetLiftApp).repository
         setContent {
             StreetLiftTheme {

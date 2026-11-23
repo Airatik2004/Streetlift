@@ -80,6 +80,9 @@ import ru.streetlift.tracker.ui.common.parseSignedFloat
 import ru.streetlift.tracker.ui.theme.DeloadGreen
 import ru.streetlift.tracker.ui.theme.TimerDigits
 import ru.streetlift.tracker.ui.theme.WarnOrange
+import ru.streetlift.tracker.workout.ActiveWorkout
+import ru.streetlift.tracker.workout.Draft
+import ru.streetlift.tracker.workout.StepRow
 
 /**
  * Экран тренировки — «плеер» по шагам, как у интервальных таймеров:
@@ -104,14 +107,8 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
 
     BackHandler { onExit() }
 
-    // Подписи для уведомления таймера
-    LaunchedEffect(ui.stepKey, ui.doneSets, ui.plannedSets) {
-        val cur = ui.current
-        val next = if (cur == null) "Все подходы сделаны" else {
-            "Дальше: ${cur.exercise.name} · подход ${ui.currentSetNumber} из ${cur.plannedCount}"
-        }
-        RestTimer.setInfo(next, "подходов ${ui.doneSets}/${ui.plannedSets}")
-    }
+    // Тренировка живёт на уровне процесса — её же видит уведомление
+    LaunchedEffect(sessionId) { ActiveWorkout.begin(ctx, sessionId) }
 
     if (ui.missing) {
         Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -126,6 +123,10 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
     var weight by remember(ui.stepKey) { mutableFloatStateOf(ui.defaultWeight) }
     var reps by remember(ui.stepKey) { mutableIntStateOf(ui.defaultReps) }
     var rir by remember(ui.stepKey) { mutableIntStateOf(ui.defaultRir) }
+    // То, что стоит в полях, нужно и кнопке «Следующий» в уведомлении
+    LaunchedEffect(ui.stepKey, weight, reps, rir, ui.currentStage) {
+        ActiveWorkout.setDraft(ui.stepKey, Draft(weight, reps, rir, ui.currentStage))
+    }
 
     val listState = rememberLazyListState()
     LaunchedEffect(ui.currentRow, ui.rows.size) {
@@ -180,7 +181,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                         ui = ui,
                         weight = weight, reps = reps, rir = rir,
                         onWeight = { weight = it }, onReps = { reps = it }, onRir = { rir = it },
-                        onSets = { vm.changeSets(cur.exercise.id, it) },
+                        onSets = { ActiveWorkout.changeSets(cur.exercise.id, it) },
                         onStage = { vm.setStage(cur.exercise.id, it) },
                         onAddStage = { vm.addStage(it) },
                     )
@@ -234,23 +235,15 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
 
         // --- ⏮ ⏯ ⏭ ---
         Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-            PlayerButton(Icons.Filled.SkipPrevious, "Предыдущий", enabled = ui.canUndo) {
-                if (ui.resting) TimerActions.reset()
-                vm.undoLast()
-            }
+            PlayerButton(Icons.Filled.SkipPrevious, "Предыдущий", enabled = ui.canUndo) { ActiveWorkout.prev(ctx) }
             PlayerButton(
                 if (ui.resting && timer.running) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                 if (ui.resting && timer.running) "Пауза" else "Продолжить",
                 enabled = ui.resting,
-            ) { TimerActions.toggle(ctx) }
+            ) { ActiveWorkout.toggle(ctx) }
             PlayerButton(Icons.Filled.SkipNext, "Следующий", enabled = cur != null) {
-                if (ui.resting) {
-                    TimerActions.reset() // отдых закончен досрочно
-                } else {
-                    vm.logSet(weight, reps, rir) { rec ->
-                        TimerActions.start(ctx, rec.seconds * 1000L, owner = vm.owner)
-                    }
-                }
+                ActiveWorkout.setDraft(ui.stepKey, Draft(weight, reps, rir, ui.currentStage))
+                ActiveWorkout.next(ctx)
             }
         }
     }
@@ -295,7 +288,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
             confirm = "Удалить",
             onDismiss = { logToDelete = null },
             onConfirm = {
-                vm.deleteLog(log)
+                ActiveWorkout.deleteLog(ctx, log)
                 logToDelete = null
             },
         )

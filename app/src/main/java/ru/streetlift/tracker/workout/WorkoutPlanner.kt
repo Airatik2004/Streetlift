@@ -1,0 +1,141 @@
+package ru.streetlift.tracker.workout
+
+import ru.streetlift.tracker.data.db.ExerciseEntity
+import ru.streetlift.tracker.data.db.SessionEntity
+import ru.streetlift.tracker.data.db.SetLogEntity
+import ru.streetlift.tracker.domain.RestRecommendation
+import ru.streetlift.tracker.domain.RestRecommender
+import ru.streetlift.tracker.domain.SessionPlan
+import kotlin.math.max
+
+data class ExerciseBlock(
+    val exercise: ExerciseEntity,
+    val plan: SessionPlan,
+    val logs: List<SetLogEntity>,
+    /** Запланировано подходов с учётом −/+ в пределах коридора. */
+    val plannedCount: Int,
+    /** Коридор для −/+. */
+    val minCount: Int,
+    val maxCount: Int,
+) {
+    val doneCount: Int get() = logs.size
+}
+
+/** Строка списка шагов: подход (сделанный или будущий) или отдых между подходами. */
+sealed interface StepRow {
+    data class Work(val block: ExerciseBlock, val setNumber: Int, val log: SetLogEntity?) : StepRow
+    data class Rest(val seconds: Int) : StepRow
+}
+
+/** Значения для ввода подхода. */
+data class Draft(val weight: Float, val reps: Int, val rir: Int, val stage: String?)
+
+/** Полное вычисленное состояние тренировки на текущий момент. */
+data class PlanResult(
+    val session: SessionEntity,
+    val blocks: List<ExerciseBlock>,
+    val alternating: Boolean,
+    val current: ExerciseBlock?,
+    val setNumber: Int,
+    val stepKey: String,
+    val doneSets: Int,
+    val plannedSets: Int,
+    val rows: List<StepRow>,
+    val currentRow: Int,
+    val defaults: Draft,
+    val canUndo: Boolean,
+    val resting: Boolean,
+) {
+    fun recommend(b: ExerciseBlock): RestRecommendation =
+        RestRecommender.recommend(b.exercise.type, alternating, b.plan.isDeload)
+
+    /** «Отжимания в горизонте · подход 3 из 4». */
+    val exerciseLine: String
+        get() = current?.let { "${it.exercise.name} · подход $setNumber из ${it.plannedCount}" } ?: "Все подходы сделаны"
+}
+
+/** Порядок подходов, текущий шаг и список шагов — общая логика экрана и уведомления. */
+object WorkoutPlanner {
+
+    fun compute(
+        session: SessionEntity,
+        exercises: List<ExerciseEntity>,
+        plans: Map<Long, SessionPlan>,
+        logs: List<SetLogEntity>,
+        extra: Map<Long, Int>,
+        prefill: Map<String, Draft>,
+        resting: Boolean,
+    ): PlanResult {
+        val blocks = exercises.map { ex ->
+            val plan = plans.getValue(ex.id)
+            val exLogs = logs.filter { it.exerciseId == ex.id }.sortedBy { it.loggedAt }
+            val floor = if (plan.isDeload || plan.isCalibration) 1 else max(1, ex.minSets - 1)
+            val minCount = max(floor, exLogs.size)
+            val maxCount = max(max(ex.maxSets, plan.sets), exLogs.size)
+            ExerciseBlock(
+                exercise = ex,
+                plan = plan,
+                logs = exLogs,
+                plannedCount = (plan.sets + (extra[ex.id] ?: 0)).coerceIn(minCount, maxCount),
+                minCount = minCount,
+                maxCount = maxCount,
+            )
+        }
+        val alternating = session.alternating && blocks.size > 1
+        val order = buildOrder(blocks, alternating)
+        val byId = blocks.associateBy { it.exercise.id }
+        val nextPending = order.firstOrNull { (id, n) -> n > (byId[id]?.doneCount ?: 0) }
+        val current = nextPending?.let { byId[it.first] }
+        val setNumber = (current?.doneCount ?: 0) + 1
+        val stepKey = "${current?.exercise?.id}_${current?.doneCount}"
+        val isResting = resting && current != null
+
+        val rows = mutableListOf<StepRow>()
+        var currentRow = 0
+        order.forEachIndexed { i, (id, n) ->
+            val b = byId.getValue(id)
+            if (i > 0) {
+                val prev = byId.getValue(order[i - 1].first)
+                rows += StepRow.Rest(RestRecommender.recommend(prev.exercise.type, alternating, prev.plan.isDeload).seconds)
+            }
+            if (current != null && id == current.exercise.id && n == setNumber) {
+                currentRow = if (isResting && rows.lastOrNull() is StepRow.Rest) rows.size - 1 else rows.size
+            }
+            rows += StepRow.Work(b, n, b.logs.getOrNull(n - 1))
+        }
+        if (current == null) currentRow = (rows.size - 1).coerceAtLeast(0)
+
+        val pf = prefill[stepKey]
+        val prevLog = current?.logs?.lastOrNull()
+        val defaults = Draft(
+            weight = pf?.weight ?: prevLog?.weightKg ?: current?.plan?.weightKg ?: 0f,
+            reps = pf?.reps ?: prevLog?.reps ?: current?.plan?.targetReps ?: 0,
+            rir = pf?.rir ?: prevLog?.rir ?: current?.plan?.rirMin ?: 2,
+            stage = pf?.stage ?: prevLog?.leverageStage ?: current?.exercise?.leverageStage,
+        )
+        return PlanResult(
+            session = session,
+            blocks = blocks,
+            alternating = alternating,
+            current = current,
+            setNumber = setNumber,
+            stepKey = stepKey,
+            doneSets = blocks.sumOf { it.doneCount },
+            plannedSets = blocks.sumOf { it.plannedCount },
+            rows = rows,
+            currentRow = currentRow,
+            defaults = defaults,
+            canUndo = logs.isNotEmpty(),
+            resting = isResting,
+        )
+    }
+
+    /** Последовательно: А1 А2 А3 Б1 Б2… Чередование: А1 Б1 А2 Б2… */
+    private fun buildOrder(blocks: List<ExerciseBlock>, alternating: Boolean): List<Pair<Long, Int>> =
+        if (!alternating) {
+            blocks.flatMap { b -> (1..b.plannedCount).map { b.exercise.id to it } }
+        } else {
+            val maxN = blocks.maxOfOrNull { it.plannedCount } ?: 0
+            (1..maxN).flatMap { n -> blocks.filter { it.plannedCount >= n }.map { it.exercise.id to n } }
+        }
+}

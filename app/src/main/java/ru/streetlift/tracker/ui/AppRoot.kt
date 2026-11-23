@@ -53,6 +53,14 @@ fun AppRoot(repo: WorkoutRepository) {
         return
     }
     val nav = rememberNavController()
+    val openRequest by ru.streetlift.tracker.NavRequests.openWorkout.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(openRequest) {
+        val id = openRequest ?: return@LaunchedEffect
+        ru.streetlift.tracker.NavRequests.openWorkout.value = null
+        if (nav.currentBackStackEntry?.destination?.route?.startsWith("workout") != true) {
+            nav.navigate("workout/$id") { launchSingleTop = true }
+        }
+    }
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
     val showBar = route == null || !route.startsWith("workout")

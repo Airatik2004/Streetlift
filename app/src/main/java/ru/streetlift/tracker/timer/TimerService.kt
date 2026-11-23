@@ -36,6 +36,8 @@ import kotlinx.coroutines.launch
 import ru.streetlift.tracker.MainActivity
 import ru.streetlift.tracker.R
 import ru.streetlift.tracker.domain.Fmt
+import ru.streetlift.tracker.workout.ActiveWorkout
+import ru.streetlift.tracker.workout.PlanResult
 import kotlin.math.abs
 
 /**
@@ -75,14 +77,26 @@ class TimerService : Service() {
                 wasFinished = st.finished
             }
         }
+        // Изменения тренировки (подход записан/откатан) — обновить уведомление
+        scope.launch {
+            ActiveWorkout.result.collect {
+                val st = RestTimer.state.value
+                if (st.idle && !workoutActive()) shutdown() else updateNotification(st)
+            }
+        }
     }
+
+    /** Идёт тренировка — уведомление висит всё время, а не только во время отдыха. */
+    private fun workoutActive() = ActiveWorkout.sessionId.value != null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Всегда сначала уходим в foreground — иначе система убьёт сервис.
         goForeground(RestTimer.state.value)
         prefs = TimerPrefs.load(this)
         when (intent?.action) {
-            ACTION_TOGGLE -> RestTimer.toggle()
+            ACTION_PREV -> ActiveWorkout.prev(this)
+            ACTION_NEXT -> ActiveWorkout.next(this)
+            ACTION_TOGGLE -> if (workoutActive()) ActiveWorkout.toggle(this) else RestTimer.toggle()
             ACTION_PLUS -> RestTimer.add(15_000)
             ACTION_MINUS -> RestTimer.add(-15_000)
             ACTION_STOP -> {
@@ -91,7 +105,7 @@ class TimerService : Service() {
                 shutdown()
             }
         }
-        if (RestTimer.state.value.idle) shutdown()
+        if (RestTimer.state.value.idle && !workoutActive()) shutdown()
         return START_NOT_STICKY
     }
 
@@ -115,7 +129,7 @@ class TimerService : Service() {
             onTimerFinished(st)
             return
         }
-        if (st.idle) {
+        if (st.idle && !workoutActive()) {
             shutdown()
             return
         }
@@ -134,7 +148,7 @@ class TimerService : Service() {
         stopJob = scope.launch {
             delay(signalMs)
             stopAlarm()
-            shutdown()
+            if (workoutActive()) updateNotification(RestTimer.state.value) else shutdown()
         }
     }
 
@@ -154,7 +168,9 @@ class TimerService : Service() {
         if (!inForeground) return
         val endWall = System.currentTimeMillis() + st.remainingMs
         // Время в заголовке — обновляем раз в секунду
-        val key = "${st.running}|${st.finished}|${st.label}|${st.info}|${st.totalMs}|${st.remainingSeconds}"
+        val r = ActiveWorkout.result.value
+        val key = "${st.running}|${st.finished}|${st.idle}|${st.label}|${st.info}|${st.totalMs}|${st.remainingSeconds}|" +
+            "${r?.stepKey}|${r?.resting}|${r?.doneSets}|${r?.plannedSets}|${r?.canUndo}"
         // Во время отсчёта уведомление само тикает (chronometer), обновляем только при изменениях
         if (key == lastKey) return
         lastKey = key
@@ -162,21 +178,45 @@ class TimerService : Service() {
         notifySafe(ONGOING_ID, buildOngoing(st))
     }
 
+    private fun planLine(r: PlanResult): String {
+        val cur = r.current ?: return "Откройте приложение, чтобы завершить тренировку"
+        val p = cur.plan
+        return if (p.isCalibration) "Калибровка · ${Fmt.range(p.repsMin, p.repsMax)} повт. · RIR ${p.rirMin}"
+        else "${Fmt.weight(p.weightKg)} · ${Fmt.range(p.repsMin, p.repsMax)} повт. · ${Fmt.rir(p.rirMin, p.rirMax)}"
+    }
+
     private fun buildOngoing(st: RestTimer.State): Notification {
-        // Формат как у интервальных таймеров: крупно — время, ниже — что дальше, полоса прогресса
-        val title = when {
-            st.finished -> "Отдых окончен"
-            st.running -> Fmt.clock(st.remainingSeconds)
-            else -> "${Fmt.clock(st.remainingSeconds)} · пауза"
+        val r = ActiveWorkout.result.value
+        val timerActive = st.running || (!st.idle && !st.finished)
+        val workStep = r != null && !timerActive
+
+        // Формат как у интервальных таймеров: крупно — время/упражнение, ниже — что дальше, полоса прогресса
+        val title: String
+        val text: String
+        val sub: String?
+        val progress: Int
+        if (workStep && r != null) {
+            title = r.current?.exercise?.name ?: "Все подходы сделаны"
+            text = r.current?.let { "Подход ${r.setNumber} из ${it.plannedCount} · ${planLine(r)}" } ?: planLine(r)
+            sub = "подходов ${r.doneSets}/${r.plannedSets}"
+            progress = if (r.plannedSets > 0) r.doneSets * 1000 / r.plannedSets else 0
+        } else {
+            title = when {
+                st.finished -> "Отдых окончен"
+                st.running -> Fmt.clock(st.remainingSeconds)
+                else -> "${Fmt.clock(st.remainingSeconds)} · пауза"
+            }
+            text = if (r != null) "Дальше: ${r.exerciseLine}" else st.label.ifBlank { "Отдых" }
+            sub = if (r != null) "подходов ${r.doneSets}/${r.plannedSets}" else st.info.ifBlank { null }
+            progress = if (st.finished) 1000 else ((1f - st.progress) * 1000).toInt().coerceIn(0, 1000)
         }
-        val elapsed = ((1f - st.progress) * 1000).toInt().coerceIn(0, 1000)
         val b = NotificationCompat.Builder(this, CH_RUNNING)
             .setSmallIcon(R.drawable.ic_stat_timer)
             .setLargeIcon(largeIcon())
             .setContentTitle(title)
-            .setContentText(st.label.ifBlank { "Отдых" })
-            .setSubText(st.info.ifBlank { null })
-            .setProgress(1000, if (st.finished) 1000 else elapsed, false)
+            .setContentText(text)
+            .setSubText(sub)
+            .setProgress(1000, progress, false)
             .setColor(0xFF2196F3.toInt())
             .setColorized(true)
             .setShowWhen(false)
@@ -187,7 +227,13 @@ class TimerService : Service() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(openAppIntent())
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-        if (!st.finished) {
+        if (r != null) {
+            // Тренировка: ⏮ Предыдущий · ⏯ Пауза · ⏭ Следующий — как на экране
+            b.addAction(0, "Предыдущий", actionIntent(ACTION_PREV, 4))
+            b.addAction(0, if (workStep || st.running) "Пауза" else "Продолжить", actionIntent(ACTION_TOGGLE, 1))
+            // На подходе «Следующий» открывает экран ввода результата; на отдыхе — заканчивает отдых
+            b.addAction(0, "Следующий", if (workStep) openWorkoutIntent(r.session.id) else actionIntent(ACTION_NEXT, 5))
+        } else if (!st.finished) {
             b.addAction(0, if (st.running) "Пауза" else "Старт", actionIntent(ACTION_TOGGLE, 1))
             b.addAction(0, "Стоп", actionIntent(ACTION_STOP, 3))
         }
@@ -232,6 +278,13 @@ class TimerService : Service() {
         val i = Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         return PendingIntent.getActivity(this, 0, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    }
+
+    private fun openWorkoutIntent(sessionId: Long): PendingIntent {
+        val i = Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            .putExtra(ru.streetlift.tracker.NavRequests.EXTRA_OPEN_SESSION, sessionId)
+        return PendingIntent.getActivity(this, 6, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
     private fun actionIntent(action: String, code: Int): PendingIntent {
@@ -388,6 +441,8 @@ class TimerService : Service() {
         const val ACTION_PLUS = "ru.streetlift.tracker.timer.PLUS"
         const val ACTION_MINUS = "ru.streetlift.tracker.timer.MINUS"
         const val ACTION_STOP = "ru.streetlift.tracker.timer.STOP"
+        const val ACTION_PREV = "ru.streetlift.tracker.timer.PREV"
+        const val ACTION_NEXT = "ru.streetlift.tracker.timer.NEXT"
 
         fun createChannels(context: Context) {
             val nm = context.getSystemService(NotificationManager::class.java)

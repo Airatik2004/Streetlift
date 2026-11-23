@@ -348,7 +348,7 @@ fun TimerScreen() {
             }
         }
         // Общий блок звука стоит на месте; свайп по нему листает нижние вкладки (Цикл ↔ Таймер ↔ История)
-        if (pager.currentPage > 0) SignalSettingsCard(prefs, update)
+        SignalSettingsCard(prefs, update)
     }
 }
 

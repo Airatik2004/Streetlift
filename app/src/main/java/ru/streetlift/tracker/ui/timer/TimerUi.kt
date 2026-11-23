@@ -22,6 +22,8 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -296,18 +298,24 @@ fun TimerScreen() {
     // Экран не гаснет, пока идёт секундомер или интервалы
     KeepScreenOn(sw.active || iv.active)
 
-    Column(Modifier.fillMaxSize()) {
-        Box(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp)) {
-            ModeSwitch(listOf("Отдых", "Секундомер", "Интервалы"), pager.currentPage) {
-                scope.launch { pager.animateScrollToPage(it) }
-            }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        ModeSwitch(listOf("Отдых", "Секундомер", "Интервалы"), pager.currentPage) {
+            scope.launch { pager.animateScrollToPage(it) }
         }
-        androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.weight(1f)) { page ->
+        // Листается только блок режима (таймер + его настройки)
+        androidx.compose.foundation.pager.HorizontalPager(
+            state = pager,
+            verticalAlignment = Alignment.Top,
+            pageSpacing = 16.dp,
+        ) { page ->
             Column(
-                Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
+                Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
@@ -316,14 +324,34 @@ fun TimerScreen() {
                     1 -> StopwatchPanel(sw)
                     else -> IntervalsPanel(iv, prefs, update)
                 }
-                // Настройки режима — в блоке самого режима, под таймером
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         ModeSettings(page, prefs, update)
                     }
                 }
-                SignalSettingsCard(prefs, update)
             }
+        }
+        // Общий блок звука стоит на месте; свайп по нему переключает режим таймера
+        Box(
+            Modifier.pointerInput(Unit) {
+                var total = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { total = 0f },
+                    onDragEnd = {
+                        val target = when {
+                            total < -80f -> pager.currentPage + 1
+                            total > 80f -> pager.currentPage - 1
+                            else -> pager.currentPage
+                        }.coerceIn(0, 2)
+                        scope.launch { pager.animateScrollToPage(target) }
+                    },
+                ) { change, drag ->
+                    change.consume()
+                    total += drag
+                }
+            },
+        ) {
+            SignalSettingsCard(prefs, update)
         }
     }
 }

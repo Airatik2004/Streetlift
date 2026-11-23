@@ -109,6 +109,7 @@ private val dateFmt = DateTimeFormatter.ofPattern("dd.MM.yy")
 private fun day(d: Long) = LocalDate.ofEpochDay(d).format(dateFmt)
 
 /** Вкладка «Статистика»: история, рекорды, графики, бег. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StatsScreen(repo: WorkoutRepository) {
     val vm: StatsViewModel = viewModel(factory = viewModelFactory { initializer { StatsViewModel(repo) } })

@@ -196,15 +196,6 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
             }
         }
 
-        // --- Подводка к старту ---
-        item {
-            PeakCard(
-                ui = ui,
-                onEdit = { peakDialog = true },
-                onClear = { vm.clearPeak() },
-            )
-        }
-
         // --- Статус мезоцикла и разгрузки ---
         item {
             Card(Modifier.fillMaxWidth()) {
@@ -341,6 +332,15 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
                     }
                 }
             }
+        }
+
+        // --- Подводка к старту (под карточкой тренировки) ---
+        item {
+            PeakCard(
+                ui = ui,
+                onEdit = { peakDialog = true },
+                onClear = { vm.clearPeak() },
+            )
         }
 
         if (ui.showWeightsHint) {

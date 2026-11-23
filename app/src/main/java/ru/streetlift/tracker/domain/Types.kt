@@ -7,6 +7,7 @@ enum class ExerciseType(val title: String) {
     HYPERTROPHY_PUMP("Многоповторка / закачка"),
     ACCESSORY("Подсобка / ноги"),
     STATIC_HOLD("Статика (удержание)"),
+    ISOLATION("Изоляция / мелкие мышцы"),
 }
 
 /** Чем меряется подход: повторы или секунды удержания. */

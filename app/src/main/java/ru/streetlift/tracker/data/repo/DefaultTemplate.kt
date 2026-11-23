@@ -10,6 +10,7 @@ import ru.streetlift.tracker.domain.ExerciseType.ACCESSORY
 import ru.streetlift.tracker.domain.ExerciseType.EXPLOSIVE
 import ru.streetlift.tracker.domain.ExerciseType.HEAVY_LEVER
 import ru.streetlift.tracker.domain.ExerciseType.HYPERTROPHY_PUMP
+import ru.streetlift.tracker.domain.ExerciseType.ISOLATION
 import ru.streetlift.tracker.domain.ExerciseType.STATIC_HOLD
 import ru.streetlift.tracker.domain.Metric
 
@@ -41,7 +42,7 @@ object DefaultTemplate {
             listOf(
                 Ex("Выходы силой", EXPLOSIVE, 5..6, 6..10, 1..2, 2.5f),
                 Ex("Пистолетики", ACCESSORY, 3..4, 8..12, 2..2, 2.5f),
-                Ex("Обратные разведения на заднюю дельту", ACCESSORY, 3..3, 15..20, 2..2, 1.25f, alwaysLast = true, shareKey = "rear_delt"),
+                Ex("Обратные разведения на заднюю дельту", ISOLATION, 3..3, 15..20, 2..2, 1.25f, alwaysLast = true, shareKey = "rear_delt"),
             ),
         ),
         Day(
@@ -57,7 +58,7 @@ object DefaultTemplate {
             listOf(
                 Ex("Отжимания на брусьях", HYPERTROPHY_PUMP, 4..4, 15..20, 2..2, 2.5f),
                 Ex("Подтягивания", HYPERTROPHY_PUMP, 4..4, 15..20, 2..2, 2.5f),
-                Ex("Обратные разведения на заднюю дельту", ACCESSORY, 3..3, 15..20, 2..2, 1.25f, alwaysLast = true, shareKey = "rear_delt"),
+                Ex("Обратные разведения на заднюю дельту", ISOLATION, 3..3, 15..20, 2..2, 1.25f, alwaysLast = true, shareKey = "rear_delt"),
             ),
         ),
         Day(

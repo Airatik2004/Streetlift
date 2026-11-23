@@ -21,13 +21,15 @@ class RestRecommenderTest {
     }
 
     @Test
-    fun pump_is1m30() {
-        assertEquals(90, RestRecommender.recommend(ExerciseType.HYPERTROPHY_PUMP, false, false).seconds)
+    fun pump_is2m_accessory2m30_isolation1m30() {
+        assertEquals(120, RestRecommender.recommend(ExerciseType.HYPERTROPHY_PUMP, false, false).seconds)
+        assertEquals(150, RestRecommender.recommend(ExerciseType.ACCESSORY, false, false).seconds)
+        assertEquals(90, RestRecommender.recommend(ExerciseType.ISOLATION, false, false).seconds)
     }
 
     @Test
     fun deload_cuts30Seconds() {
-        assertEquals(60, RestRecommender.recommend(ExerciseType.HYPERTROPHY_PUMP, false, true).seconds)
+        assertEquals(90, RestRecommender.recommend(ExerciseType.HYPERTROPHY_PUMP, false, true).seconds)
         assertEquals(120, RestRecommender.recommend(ExerciseType.HEAVY_LEVER, true, true).seconds)
         assertTrue(RestRecommender.recommend(ExerciseType.HEAVY_LEVER, true, true).reason.contains("разгрузка"))
     }

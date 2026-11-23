@@ -103,7 +103,7 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
         val previews = if (day == null) emptyList() else ru.streetlift.tracker.domain.ProgramOrder.order(
             day.position, exs.filter { it.dayId == day.id }.sortedBy { it.position }, s.priority,
         )
-            .map { ExercisePreview(it, Peaking.resolve(it.toConfig(), it.toState(), it.type, global, phase, it.id in peakIds, s.bodyWeightKg)) }
+            .map { ExercisePreview(it, Peaking.resolve(it.toConfig(), it.toState(), it.type, global && !it.plannedDeloadExempt, phase, it.id in peakIds, s.bodyWeightKg)) }
         val dayOrder = days.associate { it.id to it.position }
         HomeUiState(
             loading = false,
@@ -260,7 +260,7 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
 
                         ui.previews.forEachIndexed { i, p ->
                             if (i > 0) HorizontalDivider()
-                            PreviewRow(p)
+                            PreviewRow(p, ui.globalDeload)
                         }
                         if (ui.previews.isEmpty()) {
                             Text("В этом дне пока нет упражнений — добавьте их во вкладке «Цикл».")
@@ -357,7 +357,7 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
 }
 
 @Composable
-private fun PreviewRow(p: ExercisePreview) {
+private fun PreviewRow(p: ExercisePreview, globalDeload: Boolean) {
     val e = p.exercise
     val plan = p.plan
     if (plan == null) {
@@ -375,6 +375,7 @@ private fun PreviewRow(p: ExercisePreview) {
                 plan.isCalibration -> Tag("Калибровка", MaterialTheme.colorScheme.secondary)
                 plan.isEmergencyDeload -> Tag("Авар. разгрузка", WarnOrange)
                 plan.isDeload -> Tag("Разгрузка", DeloadGreen)
+                globalDeload && e.plannedDeloadExempt -> Tag(ru.streetlift.tracker.ui.editor.deloadExemptLabel(e), DeloadGreen)
             }
         }
         e.leverageStage?.let {

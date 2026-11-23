@@ -148,6 +148,11 @@ fun EditorScreen(repo: WorkoutRepository) {
                             if (e.stageCeiling) {
                                 Tag("Потолок стадии достигнут — можно переходить на следующую стадию", ru.streetlift.tracker.ui.theme.WarnOrange)
                             }
+                            if (e.plannedDeloadExempt && e.mode != ExerciseMode.CALIBRATION &&
+                                ru.streetlift.tracker.domain.ProgressionEngine.isGlobalDeload(s.cycleInMeso, s.deloadEvery, s.deloadOverride)
+                            ) {
+                                Tag(deloadExemptLabel(e), ru.streetlift.tracker.ui.theme.DeloadGreen)
+                            }
                             if (e.mode != ExerciseMode.CALIBRATION) {
                                 Text(
                                     "Сейчас: ${Fmt.weight(e.weightKg)}, ${e.plannedSets} подх., цель ${e.targetReps}+${if (e.isSeconds) " с" else ""}" +
@@ -251,6 +256,8 @@ private fun CalibrationDialog(
     var stage by remember { mutableStateOf(exercise.leverageStage) }
     var calibrate by remember { mutableStateOf(exercise.mode == ExerciseMode.CALIBRATION) }
     var deload by remember { mutableStateOf(exercise.emergencyDeloadNext) }
+    // null — не трогали (остаётся авто), иначе явный выбор
+    var skipPlanned by remember { mutableStateOf(exercise.skipPlannedDeload) }
     var weight by remember { mutableStateOf(Fmt.weight(exercise.weightKg).removeSuffix(" кг")) }
     var error by remember { mutableStateOf<String?>(null) }
     val stageChanged = stage != exercise.leverageStage
@@ -304,6 +311,21 @@ private fun CalibrationDialog(
                     }
                     Switch(checked = deload, onCheckedChange = { deload = it })
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Пропустить плановую разгрузку", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            if (skipPlanned == null && exercise.autoDeloadExempt) {
+                                "Новая стадия: ${exercise.cyclesSinceStage} из 3 циклов — разгрузка пропускается автоматически"
+                            } else {
+                                "только ближайшая плановая разгрузка, потом сбрасывается"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = skipPlanned ?: exercise.autoDeloadExempt, onCheckedChange = { skipPlanned = it })
+                }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
         },
@@ -319,6 +341,7 @@ private fun CalibrationDialog(
                             leverageStage = stage,
                             mode = if (calibrate || stageChanged) ExerciseMode.CALIBRATION else ExerciseMode.ACTIVE,
                             emergencyDeloadNext = deload,
+                            skipPlannedDeload = skipPlanned,
                         ),
                     )
                 }
@@ -327,3 +350,8 @@ private fun CalibrationDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
     )
 }
+
+/** Подпись исключения из плановой разгрузки. */
+internal fun deloadExemptLabel(e: ExerciseEntity): String =
+    if (e.skipPlannedDeload == null && e.autoDeloadExempt) "Без разгрузки — новая стадия (${e.cyclesSinceStage} из 3 циклов)"
+    else "Без разгрузки"

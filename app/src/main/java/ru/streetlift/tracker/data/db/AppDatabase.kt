@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         StageEntity::class,
         StageArchiveEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -26,6 +26,14 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun sessionDao(): SessionDao
 
     companion object {
+        /** v9: пропуск плановой разгрузки и счётчик циклов со смены стадии. Данные сохраняются. */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE exercises ADD COLUMN skipPlannedDeload INTEGER")
+                db.execSQL("ALTER TABLE exercises ADD COLUMN cyclesSinceStage INTEGER NOT NULL DEFAULT 99")
+            }
+        }
+
         /** v4: снимок для отката тренировки. Данные сохраняются. */
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -46,7 +54,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "streetlift.db")
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_8_9)
                 // Самая первая сборка (v1) не сохраняется — пересоздаётся
                 .fallbackToDestructiveMigration()
                 .build()

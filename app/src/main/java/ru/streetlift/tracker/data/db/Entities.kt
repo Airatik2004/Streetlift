@@ -108,7 +108,17 @@ data class ExerciseEntity(
     val alwaysLast: Boolean = false,
     /** Одно упражнение в нескольких днях с общим прогрессом (задняя дельта: дни 1 и 3). */
     val shareKey: String? = null,
+    /** Пропуск плановой разгрузки на текущий разгрузочный цикл: null — авто, true — пропустить, false — разгружать. */
+    val skipPlannedDeload: Boolean? = null,
+    /** Рабочих циклов со смены стадии (без круга калибровки); 99 — давно. */
+    val cyclesSinceStage: Int = 99,
 ) {
+    /** Автоисключение: меньше 3 рабочих циклов на новой стадии. */
+    val autoDeloadExempt: Boolean get() = stageGroup != null && cyclesSinceStage < 3
+
+    /** Не разгружать в плановую разгрузку (вручную или автоматически). */
+    val plannedDeloadExempt: Boolean get() = skipPlannedDeload ?: autoDeloadExempt
+
     val isSeconds: Boolean get() = metric == Metric.SECONDS
 
     /** Не участвует в суперсете — идёт в конце дня (статика и «всегда последние»). */

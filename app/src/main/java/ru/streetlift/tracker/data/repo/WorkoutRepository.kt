@@ -72,7 +72,13 @@ class WorkoutRepository(private val db: AppDatabase) {
         val all = programDao.getAllExercises()
         val copies = keyed.flatMap { src ->
             all.filter { it.shareKey == src.shareKey && it.id != src.id }
-                .map { it.withState(src.toState()).copy(leverageStage = src.leverageStage) }
+                .map {
+                    it.withState(src.toState()).copy(
+                        leverageStage = src.leverageStage,
+                        skipPlannedDeload = src.skipPlannedDeload,
+                        cyclesSinceStage = src.cyclesSinceStage,
+                    )
+                }
         }
         if (copies.isNotEmpty()) programDao.updateExercises(copies)
     }
@@ -205,7 +211,8 @@ class WorkoutRepository(private val db: AppDatabase) {
         if (peak != null) lines += "Выход на пик (${peak.title}) — рабочий план не меняется, результаты в истории."
         val updated = if (peak != null) emptyList() else exercises.map { ex ->
             val exLogs = logs.filter { it.exerciseId == ex.id }
-            val wasDeload = session.isDeload || ex.emergencyDeloadNext
+            // Плановая разгрузка не касается исключённых упражнений (вручную или новая стадия)
+            val wasDeload = (session.isDeload && !ex.plannedDeloadExempt) || ex.emergencyDeloadNext
             val result = ProgressionEngine.computeNext(
                 ex.toConfig(),
                 ex.toState(),
@@ -214,10 +221,15 @@ class WorkoutRepository(private val db: AppDatabase) {
                 stageCeilingEligible = ex.stageCeilingEligible,
             )
             lines += "• ${ex.name}: ${result.message}"
-            val next = ex.withState(result.state)
+            // Рабочий цикл на стадии засчитан (круг калибровки не считается)
+            val worked = exLogs.isNotEmpty() && ex.mode == ExerciseMode.ACTIVE
+            val next = ex.withState(result.state).copy(
+                cyclesSinceStage = if (worked) (ex.cyclesSinceStage + 1).coerceAtMost(99) else ex.cyclesSinceStage,
+            )
             // Калибровка фиксирует и стадию последнего рабочего подхода
             if (ex.mode == ExerciseMode.CALIBRATION && exLogs.isNotEmpty()) {
-                next.copy(leverageStage = exLogs.last().leverageStage ?: ex.leverageStage)
+                val st = exLogs.last().leverageStage ?: ex.leverageStage
+                next.copy(leverageStage = st, cyclesSinceStage = if (st != ex.leverageStage) 0 else next.cyclesSinceStage)
             } else next
         }
         if (updated.isNotEmpty()) {
@@ -230,6 +242,11 @@ class WorkoutRepository(private val db: AppDatabase) {
             CycleState(s.currentDayIndex, s.cycleInMeso, s.completedRounds, s.deloadOverride),
             dayIndex, days.size, s.deloadEvery,
         )
+        if (adv.roundCompleted && adv.wasDeloadRound) {
+            // Ручные пропуски плановой разгрузки действуют один разгрузочный цикл
+            val reset = programDao.getAllExercises().filter { it.skipPlannedDeload != null }.map { it.copy(skipPlannedDeload = null) }
+            if (reset.isNotEmpty()) programDao.updateExercises(reset)
+        }
         if (adv.roundCompleted) {
             lines += if (adv.wasDeloadRound) {
                 "Цикл завершён. Разгрузка позади — новый мезоцикл, цикл 1 из ${s.deloadEvery}."
@@ -413,7 +430,7 @@ class WorkoutRepository(private val db: AppDatabase) {
                 ),
             )
         }
-        return edited.withState(ProgressionEngine.onStageChanged(edited.toState()))
+        return edited.withState(ProgressionEngine.onStageChanged(edited.toState())).copy(cyclesSinceStage = 0)
             .copy(leverageStage = newStage)
     }
 

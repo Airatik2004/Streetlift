@@ -95,7 +95,7 @@ class TimerService : Service() {
         prefs = TimerPrefs.load(this)
         when (intent?.action) {
             ACTION_PREV -> ActiveWorkout.prev(this)
-            ACTION_NEXT -> ActiveWorkout.next(this)
+            ACTION_NEXT -> ActiveWorkout.next(this, byPlan = true)
             ACTION_TOGGLE -> if (workoutActive()) ActiveWorkout.toggle(this) else RestTimer.toggle()
             ACTION_PLUS -> RestTimer.add(15_000)
             ACTION_MINUS -> RestTimer.add(-15_000)
@@ -231,8 +231,10 @@ class TimerService : Service() {
             // Тренировка: ⏮ Предыдущий · ⏯ Пауза · ⏭ Следующий — как на экране
             b.addAction(0, "Предыдущий", actionIntent(ACTION_PREV, 4))
             b.addAction(0, if (workStep || st.running) "Пауза" else "Продолжить", actionIntent(ACTION_TOGGLE, 1))
-            // На подходе «Следующий» открывает экран ввода результата; на отдыхе — заканчивает отдых
-            b.addAction(0, "Следующий", if (workStep) openWorkoutIntent(r.session.id) else actionIntent(ACTION_NEXT, 5))
+            // Калибровка — открыть экран ввода (вес подбирается); обычный подход — записать по плану;
+            // отдых — закончить досрочно
+            val calibrating = workStep && r.current?.plan?.isCalibration == true
+            b.addAction(0, "Следующий", if (calibrating) openWorkoutIntent(r.session.id) else actionIntent(ACTION_NEXT, 5))
         } else if (!st.finished) {
             b.addAction(0, if (st.running) "Пауза" else "Старт", actionIntent(ACTION_TOGGLE, 1))
             b.addAction(0, "Стоп", actionIntent(ACTION_STOP, 3))

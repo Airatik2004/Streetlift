@@ -98,15 +98,22 @@ object ActiveWorkout {
         draft = d
     }
 
-    /** ⏭ Следующий: на подходе — записать его и начать отдых; на отдыхе — закончить отдых. */
-    fun next(ctx: Context) {
+    /**
+     * ⏭ Следующий: на подходе — записать его и начать отдых; на отдыхе — закончить отдых.
+     * [byPlan] — из уведомления: записать ровно по плану (вес, цель повторов, верхний RIR).
+     */
+    fun next(ctx: Context, byPlan: Boolean = false) {
         val r = _result.value ?: return
         if (r.resting) {
             TimerActions.reset()
             return
         }
         val cur = r.current ?: return
-        val d = draft?.takeIf { draftKey == r.stepKey } ?: r.defaults
+        val d = if (byPlan) {
+            Draft(cur.plan.weightKg, cur.plan.targetReps, cur.plan.rirMax, r.defaults.stage)
+        } else {
+            draft?.takeIf { draftKey == r.stepKey } ?: r.defaults
+        }
         val app = ctx.applicationContext
         scope.launch {
             repo(app).logSet(

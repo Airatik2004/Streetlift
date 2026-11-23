@@ -43,7 +43,19 @@ object SignalPlayer {
         val am = ctx.getSystemService(AudioManager::class.java)
         val outs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
         val list = mutableListOf<AudioDeviceInfo?>()
-        if (p.outBt) outs.firstOrNull { it.type in btTypes }?.let { list += it }
+        if (p.outBt) {
+            // Для звука нужен «музыкальный» вывод наушников (A2DP / LE Audio). SCO — гарнитура для звонков,
+            // вне звонка она молчит, поэтому берём её только если другого нет.
+            val order = buildList {
+                add(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP)
+                if (Build.VERSION.SDK_INT >= 31) {
+                    add(AudioDeviceInfo.TYPE_BLE_HEADSET)
+                    add(AudioDeviceInfo.TYPE_BLE_SPEAKER)
+                }
+                add(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+            }
+            order.firstNotNullOfOrNull { t -> outs.firstOrNull { it.type == t } }?.let { list += it }
+        }
         if (p.outSpeaker) outs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }?.let { list += it }
         return list
     }

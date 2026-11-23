@@ -116,12 +116,9 @@ fun EditorScreen(repo: WorkoutRepository) {
                     if (ui.exercises[day.id].orEmpty().size > 1) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
+                                Text("Суперсет", style = MaterialTheme.typography.bodyMedium)
                                 Text(
-                                    if (day.alternating) "Чередование" else "Последовательно",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                )
-                                Text(
-                                    if (day.alternating) "А1 → Б1 → А2 → Б2…" else "все подходы А, потом все подходы Б",
+                                    if (day.alternating) "сейчас: А1 → Б1 → А2 → Б2…" else "сейчас: все подходы А, потом все подходы Б",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )

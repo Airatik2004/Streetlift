@@ -15,6 +15,8 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.core.content.IntentCompat
 import ru.streetlift.tracker.timer.TimerPrefs
+import ru.streetlift.tracker.timer.IntervalTimer
+import ru.streetlift.tracker.timer.Stopwatch
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -275,10 +277,15 @@ fun RestTimerPanel(
     }
 }
 
-/** Отдельная вкладка «Таймер» — полноразмерный таймер + справка по рекомендациям. */
+/** Вкладка «Таймер»: три режима — Отдых, Секундомер, Интервалы. */
 @Composable
 fun TimerScreen() {
-    val ctx = LocalContext.current
+    var mode by remember { mutableStateOf(0) }
+    val sw by Stopwatch.state.collectAsStateWithLifecycle()
+    val iv by IntervalTimer.state.collectAsStateWithLifecycle()
+    // Экран не гаснет, пока идёт секундомер или интервалы
+    KeepScreenOn(sw.active || iv.active)
+
     Column(
         Modifier
             .fillMaxSize()
@@ -287,30 +294,203 @@ fun TimerScreen() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Таймер отдыха", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.fillMaxWidth())
-        RestTimerPanel(recommendation = null, compact = false)
-        SignalSettingsCard()
-
-        Text(
-            "Быстрые рекомендации",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        )
-        val recs = listOf(
-            RestRecommender.recommend(ExerciseType.HEAVY_LEVER, alternating = true, deload = false),
-            RestRecommender.recommend(ExerciseType.HEAVY_LEVER, alternating = false, deload = false),
-            RestRecommender.recommend(ExerciseType.HYPERTROPHY_PUMP, alternating = false, deload = false),
-            RestRecommender.recommend(ExerciseType.ACCESSORY, alternating = false, deload = false),
-        )
-        recs.forEach { r ->
-            RecommendationBanner(r) { TimerActions.set(r.seconds * 1000L, "") }
+        ModeSwitch(listOf("Отдых", "Секундомер", "Интервалы"), mode) { mode = it }
+        when (mode) {
+            0 -> {
+                RestTimerPanel(recommendation = null, compact = false)
+                SignalSettingsCard()
+            }
+            1 -> StopwatchPanel(sw)
+            else -> IntervalsPanel(iv)
         }
-        Text(
-            "В разгрузочном цикле рекомендации автоматически короче на 30 секунд.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.fillMaxWidth(),
-        )
+    }
+}
+
+/** Держать экран включённым (FLAG_KEEP_SCREEN_ON) пока [on]. */
+@Composable
+fun KeepScreenOn(on: Boolean) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.DisposableEffect(on) {
+        view.keepScreenOn = on
+        onDispose { view.keepScreenOn = false }
+    }
+}
+
+/** Переключатель режимов в синем стиле. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ModeSwitch(items: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(4.dp)) {
+            items.forEachIndexed { i, t ->
+                val on = i == selected
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (on) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent,
+                    contentColor = if (on) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    onClick = { onSelect(i) },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        t,
+                        style = MaterialTheme.typography.labelLarge,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.padding(vertical = 10.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 00:00.0 */
+fun formatStopwatch(ms: Long): String {
+    val tenths = (ms / 100) % 10
+    val s = (ms / 1000) % 60
+    val m = ms / 60_000
+    return String.format(java.util.Locale.US, "%02d:%02d.%d", m, s, tenths)
+}
+
+@Composable
+private fun ChoiceRow(label: String, options: List<Pair<Int, String>>, value: Int, onPick: (Int) -> Unit) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            options.forEach { (v, t) ->
+                FilterChip(selected = value == v, onClick = { onPick(v) }, label = { Text(t) })
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StopwatchPanel(sw: Stopwatch.State) {
+    val ctx = LocalContext.current
+    var prefs by remember { mutableStateOf(TimerPrefs.load(ctx)) }
+    fun update(p: TimerPrefs.Prefs) {
+        prefs = p
+        TimerPrefs.save(ctx, p)
+    }
+    Text(
+        if (sw.countdown > 0) "${sw.countdown}" else formatStopwatch(sw.elapsedMs),
+        style = TimerDigits.copy(fontSize = 64.sp),
+        color = if (sw.countdown > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        FilledTonalButton(onClick = { if (sw.running) Stopwatch.lap() else Stopwatch.reset() }) {
+            Text(if (sw.running) "Отсечка" else "Сброс")
+        }
+        FilledIconButton(
+            onClick = { Stopwatch.toggle(ctx) },
+            modifier = Modifier.size(64.dp),
+            colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary),
+        ) {
+            Icon(
+                if (sw.active) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                contentDescription = if (sw.active) "Пауза" else "Старт",
+                modifier = Modifier.size(34.dp),
+            )
+        }
+    }
+    if (sw.laps.isNotEmpty()) {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                sw.laps.forEachIndexed { i, t ->
+                    val prev = if (i == 0) 0L else sw.laps[i - 1]
+                    Row {
+                        Text("Попытка ${i + 1}", Modifier.weight(1f))
+                        Text("+${formatStopwatch(t - prev)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(12.dp))
+                        Text(formatStopwatch(t), fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+    }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            ChoiceRow("Задержка старта", listOf(0 to "Выкл", 3 to "3с", 5 to "5с"), prefs.stopwatchDelay) {
+                update(prefs.copy(stopwatchDelay = it))
+            }
+            ChoiceRow("Звуковая отсечка", listOf(0 to "Выкл", 5 to "каждые 5с", 10 to "каждые 10с"), prefs.stopwatchBeepEvery) {
+                update(prefs.copy(stopwatchBeepEvery = it))
+            }
+            Text(
+                "Эти же настройки — у секундомера статики на тренировке.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun IntervalsPanel(iv: IntervalTimer.State) {
+    val ctx = LocalContext.current
+    var prefs by remember { mutableStateOf(TimerPrefs.load(ctx)) }
+    fun update(p: TimerPrefs.Prefs) {
+        prefs = p
+        TimerPrefs.save(ctx, p)
+    }
+    val cfg = IntervalTimer.Config(prefs.ivPrep, prefs.ivWork, prefs.ivRest, prefs.ivRounds)
+
+    TimerRing(if (iv.active) iv.progress else 1f, 240.dp, 12.dp, iv.phase == IntervalTimer.Phase.DONE) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(iv.phase.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            Text(
+                if (iv.active) Fmt.clock(iv.remainingSeconds) else Fmt.clock(cfg.work),
+                style = TimerDigits.copy(fontSize = 56.sp),
+            )
+            Text(
+                if (iv.active) "Раунд ${iv.round} из ${iv.rounds}" else "${cfg.rounds} раундов",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        FilledTonalButton(onClick = { IntervalTimer.stop() }, enabled = iv.active) { Text("Стоп") }
+        FilledIconButton(
+            onClick = { if (iv.active) IntervalTimer.toggle() else IntervalTimer.start(ctx, cfg) },
+            modifier = Modifier.size(64.dp),
+            colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary),
+        ) {
+            Icon(
+                if (iv.running) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                contentDescription = if (iv.running) "Пауза" else "Старт",
+                modifier = Modifier.size(34.dp),
+            )
+        }
+    }
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        IntervalTimer.PRESETS.forEach { (name, c) ->
+            OutlinedButton(onClick = {
+                update(prefs.copy(ivPrep = c.prep, ivWork = c.work, ivRest = c.rest, ivRounds = c.rounds))
+            }) { Text(name) }
+        }
+    }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            IntervalStepper("Подготовка", Fmt.clock(prefs.ivPrep)) { d -> update(prefs.copy(ivPrep = (prefs.ivPrep + d * 5).coerceIn(0, 60))) }
+            IntervalStepper("Работа", Fmt.clock(prefs.ivWork)) { d -> update(prefs.copy(ivWork = (prefs.ivWork + d * 5).coerceIn(5, 3600))) }
+            IntervalStepper("Отдых", Fmt.clock(prefs.ivRest)) { d -> update(prefs.copy(ivRest = (prefs.ivRest + d * 5).coerceIn(0, 3600))) }
+            IntervalStepper("Раунды", prefs.ivRounds.toString()) { d -> update(prefs.copy(ivRounds = (prefs.ivRounds + d).coerceIn(1, 99))) }
+        }
+    }
+}
+
+@Composable
+private fun IntervalStepper(label: String, value: String, onDelta: (Int) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        FilledTonalIconButton(onClick = { onDelta(-1) }) { Text("−") }
+        Text(value, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 12.dp))
+        FilledTonalIconButton(onClick = { onDelta(1) }) { Text("+") }
     }
 }
 

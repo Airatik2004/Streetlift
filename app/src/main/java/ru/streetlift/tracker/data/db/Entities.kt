@@ -9,6 +9,8 @@ import ru.streetlift.tracker.domain.DeloadOverride
 import ru.streetlift.tracker.domain.ExerciseConfig
 import ru.streetlift.tracker.domain.ExerciseMode
 import ru.streetlift.tracker.domain.ExerciseType
+import ru.streetlift.tracker.domain.Metric
+import ru.streetlift.tracker.domain.PriorityMode
 import ru.streetlift.tracker.domain.PlanState
 
 /** Глобальное состояние программы (одна строка, id = 1). */
@@ -37,7 +39,12 @@ data class SettingsEntity(
     val peakExerciseIds: String = "",
     /** Свой вес — для «~85%» от полной нагрузки в подводке. */
     val bodyWeightKg: Float? = null,
+    /** Приоритет дней 2–4 и счётчик завершённых мезоциклов (для «Авто»). */
+    val priorityMode: PriorityMode = PriorityMode.AUTO,
+    val mesoIndex: Int = 0,
 ) {
+    val priority: ru.streetlift.tracker.domain.Priority get() = priorityMode.effective(mesoIndex)
+
     val peakIds: Set<Long> get() = peakExerciseIds.split(',').mapNotNull { it.trim().toLongOrNull() }.toSet()
 
     val canUndoSkip: Boolean get() = undoDayIndex != null
@@ -95,8 +102,12 @@ data class ExerciseEntity(
     val ceilingStreak: Int = 0,
     /** Потолок стадии достигнут — подсказать переход на следующую стадию. */
     val stageCeiling: Boolean = false,
+    /** REPS — повторы; SECONDS — статика, minReps..maxReps это секунды. */
+    val metric: Metric = Metric.REPS,
 ) {
-    fun toConfig() = ExerciseConfig(minSets, maxSets, minReps, maxReps, targetRirMin, targetRirMax, weightStep)
+    val isSeconds: Boolean get() = metric == Metric.SECONDS
+
+    fun toConfig() = ExerciseConfig(minSets, maxSets, minReps, maxReps, targetRirMin, targetRirMax, weightStep, isSeconds)
 
     fun toState() = PlanState(
         weightKg = weightKg,
@@ -147,6 +158,8 @@ data class SessionEntity(
     /** Фаза подводки на момент тренировки (PeakPhase.name) и пиковые упражнения. */
     val peakPhase: String? = null,
     val peakIds: String? = null,
+    /** Приоритет на момент тренировки (Priority.name) — порядок упражнений дня. */
+    val priority: String? = null,
     /** JSON-снимок цикла и плана до завершения — для отката при удалении последней тренировки. */
     val rollback: String? = null,
 )
@@ -177,6 +190,8 @@ data class SetLogEntity(
     val loggedAt: Long,
     val leverageStage: String? = null,
     val isCalibration: Boolean = false,
+    /** Статика: в reps — секунды удержания. */
+    val isSeconds: Boolean = false,
 )
 
 /** Справочник стадий рычага: 7 встроенных + свои варианты пользователя. */

@@ -100,9 +100,9 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
         val phase = Peaking.phaseOn(s.peakEpochDay, workoutDay)
         val global = ProgressionEngine.isGlobalDeload(s.cycleInMeso, s.deloadEvery, s.deloadOverride) && phase == PeakPhase.NONE
         val peakIds = s.peakIds
-        val previews = if (day == null) emptyList() else exs
-            .filter { it.dayId == day.id }
-            .sortedBy { it.position }
+        val previews = if (day == null) emptyList() else ru.streetlift.tracker.domain.ProgramOrder.order(
+            day.position, exs.filter { it.dayId == day.id }.sortedBy { it.position }, s.priority,
+        )
             .map { ExercisePreview(it, Peaking.resolve(it.toConfig(), it.toState(), it.type, global, phase, it.id in peakIds, s.bodyWeightKg)) }
         val dayOrder = days.associate { it.id to it.position }
         HomeUiState(
@@ -135,6 +135,7 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
     fun setDeload(want: Boolean) = viewModelScope.launch { repo.setDeload(want) }
     fun setPeak(epochDay: Long, ids: Set<Long>, bw: Float?) = viewModelScope.launch { repo.setPeak(epochDay, ids, bw) }
     fun clearPeak() = viewModelScope.launch { repo.clearPeak() }
+    fun setPriority(m: ru.streetlift.tracker.domain.PriorityMode) = viewModelScope.launch { repo.setPriorityMode(m) }
 
     init {
         viewModelScope.launch { repo.checkPeakExpired() }
@@ -220,6 +221,11 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
                     }
                 }
             }
+        }
+
+        // --- Приоритет (над карточкой дня) ---
+        item {
+            ru.streetlift.tracker.ui.common.PrioritySwitch(s.priorityMode, s.priority) { vm.setPriority(it) }
         }
 
         // --- Прогноз следующей тренировки ---
@@ -384,7 +390,7 @@ private fun PreviewRow(p: ExercisePreview) {
         }
         if (plan.isCalibration) {
             Text(
-                "${plan.sets} × ${Fmt.range(plan.repsMin, plan.repsMax)} · RIR ${plan.rirMin} · вес подбирается",
+                "${plan.sets} × ${Fmt.range(plan.repsMin, plan.repsMax)}${if (e.isSeconds) " с" else ""} · RIR ${plan.rirMin} · вес подбирается",
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(
@@ -394,11 +400,11 @@ private fun PreviewRow(p: ExercisePreview) {
             )
         } else {
             Text(
-                "${Fmt.weight(plan.weightKg)} · ${plan.sets} × ${Fmt.range(plan.repsMin, plan.repsMax)} · ${Fmt.rir(plan.rirMin, plan.rirMax)}",
+                "${Fmt.weight(plan.weightKg)} · ${plan.sets} × ${Fmt.range(plan.repsMin, plan.repsMax)}${if (e.isSeconds) " с" else ""} · ${Fmt.rir(plan.rirMin, plan.rirMax)}",
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(
-                "Цель: ${plan.targetReps}+ повт. в каждом подходе · ${e.type.title}",
+                "Цель: ${plan.targetReps}+ ${if (e.isSeconds) "с" else "повт."} в каждом подходе · ${e.type.title}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

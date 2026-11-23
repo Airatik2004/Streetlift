@@ -16,6 +16,8 @@ import ru.streetlift.tracker.data.db.SetLogEntity
 import ru.streetlift.tracker.data.repo.WorkoutRepository
 import ru.streetlift.tracker.domain.PeakPhase
 import ru.streetlift.tracker.domain.Peaking
+import ru.streetlift.tracker.domain.Priority
+import ru.streetlift.tracker.domain.ProgramOrder
 import ru.streetlift.tracker.domain.ProgressionEngine
 import ru.streetlift.tracker.timer.RestTimer
 import ru.streetlift.tracker.timer.TimerActions
@@ -71,7 +73,10 @@ object ActiveWorkout {
                 _missing.value = session == null
                 return@launch
             }
-            val all = session.dayId?.let { repo.getExercisesForDay(it) } ?: emptyList()
+            // Порядок дня по приоритету тренировки (Жим/Тяга): в днях 2–4 первые два меняются местами
+            val dayPos = session.dayId?.let { repo.getDay(it)?.position } ?: 0
+            val priority = session.priority?.let { runCatching { Priority.valueOf(it) }.getOrNull() } ?: Priority.PRESS
+            val all = ProgramOrder.order(dayPos, session.dayId?.let { repo.getExercisesForDay(it) } ?: emptyList(), priority)
             // Подводка: у пиковых/фоновых свой план, часть упражнений пропускается
             val bodyWeight = repo.getSettings().bodyWeightKg
             val phase = session.peakPhase?.let { runCatching { PeakPhase.valueOf(it) }.getOrNull() } ?: PeakPhase.NONE
@@ -136,6 +141,7 @@ object ActiveWorkout {
                     loggedAt = System.currentTimeMillis(),
                     leverageStage = d.stage,
                     isCalibration = cur.plan.isCalibration,
+                    isSeconds = cur.exercise.isSeconds,
                 ),
             )
             prefill.update { it - r.stepKey }

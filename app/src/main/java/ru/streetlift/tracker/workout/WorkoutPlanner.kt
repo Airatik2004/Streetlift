@@ -81,8 +81,11 @@ object WorkoutPlanner {
                 maxCount = maxCount,
             )
         }
-        val alternating = session.alternating && blocks.size > 1
-        val order = buildOrder(blocks, alternating)
+        // Статика всегда в конце дня; чередование — только среди упражнений на повторы
+        val main = blocks.filter { !it.exercise.isSeconds }
+        val tail = blocks.filter { it.exercise.isSeconds }
+        val alternating = session.alternating && main.size > 1
+        val order = buildOrder(main, alternating) + buildOrder(tail, false)
         val byId = blocks.associateBy { it.exercise.id }
         val nextPending = order.firstOrNull { (id, n) -> n > (byId[id]?.doneCount ?: 0) }
         val current = nextPending?.let { byId[it.first] }

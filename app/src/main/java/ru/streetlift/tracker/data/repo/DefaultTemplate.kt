@@ -10,6 +10,8 @@ import ru.streetlift.tracker.domain.ExerciseType.ACCESSORY
 import ru.streetlift.tracker.domain.ExerciseType.EXPLOSIVE
 import ru.streetlift.tracker.domain.ExerciseType.HEAVY_LEVER
 import ru.streetlift.tracker.domain.ExerciseType.HYPERTROPHY_PUMP
+import ru.streetlift.tracker.domain.ExerciseType.STATIC_HOLD
+import ru.streetlift.tracker.domain.Metric
 
 /** Предустановленный 4-тактный цикл (первый запуск и «Сбросить к шаблону»). */
 object DefaultTemplate {
@@ -22,10 +24,15 @@ object DefaultTemplate {
         val rir: IntRange,
         val step: Float,
         val group: String? = null,
+        val metric: Metric = Metric.REPS,
     )
 
     private data class Day(val name: String, val alternating: Boolean, val exercises: List<Ex>)
 
+    /**
+     * Программа зашита в коде. Порядок — для приоритета «Жим»; при «Тяге» в днях 2–4
+     * первые два упражнения меняются местами (ProgramOrder). Статика всегда в конце дня.
+     */
     private val days = listOf(
         Day(
             "День 1 · Выходы + ноги", false,
@@ -37,8 +44,9 @@ object DefaultTemplate {
         Day(
             "День 2 · Горизонт + 1 рука", false,
             listOf(
-                Ex("Отжимания в горизонте", HEAVY_LEVER, 3..4, 5..8, 1..2, 2.5f, StageGroups.LEVER),
+                Ex("Отжимания в горизонте", HEAVY_LEVER, 3..3, 5..8, 1..2, 2.5f, StageGroups.LEVER),
                 Ex("Подтягивания на 1 руке", HEAVY_LEVER, 3..4, 3..6, 1..2, 2.5f),
+                Ex("Удержание горизонта", STATIC_HOLD, 3..3, 8..15, 2..2, 2.5f, StageGroups.LEVER, Metric.SECONDS),
             ),
         ),
         Day(
@@ -53,10 +61,14 @@ object DefaultTemplate {
             "День 4 · Стойка + передний вис", false,
             listOf(
                 Ex("Отжимания в стойке на руках", HEAVY_LEVER, 4..5, 6..10, 1..2, 2.5f, StageGroups.HANDSTAND),
-                Ex("Подтягивания в переднем висе", HEAVY_LEVER, 4..4, 5..8, 1..2, 2.5f, StageGroups.LEVER),
+                Ex("Подтягивания в переднем висе", HEAVY_LEVER, 3..3, 5..8, 1..2, 2.5f, StageGroups.LEVER),
+                Ex("Удержание переднего виса", STATIC_HOLD, 3..3, 8..15, 2..2, 2.5f, StageGroups.LEVER, Metric.SECONDS),
             ),
         ),
     )
+
+    /** Старые названия → новые (для импорта старых бэкапов). */
+    val renamed = mapOf("Подтягивания глубоким хватом" to "Подтягивания")
 
     fun builtInStages(): List<StageEntity> = StageGroups.lists.flatMap { (group, list) ->
         list.mapIndexed { i, st ->
@@ -86,6 +98,7 @@ object DefaultTemplate {
                         targetReps = e.reps.first,
                         leverageStage = e.group?.let { StageGroups.defaultFor(it) },
                         stageGroup = e.group,
+                        metric = e.metric,
                     ),
                 )
             }

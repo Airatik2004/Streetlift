@@ -69,6 +69,7 @@ class EditorViewModel(private val repo: WorkoutRepository) : ViewModel() {
     fun setAlternating(day: DayEntity, on: Boolean) = viewModelScope.launch { repo.updateDay(day.copy(alternating = on)) }
     fun setDeloadEvery(n: Int) = viewModelScope.launch { repo.setDeloadEvery(n) }
     fun setDeload(want: Boolean) = viewModelScope.launch { repo.setDeload(want) }
+    fun setPriority(m: ru.streetlift.tracker.domain.PriorityMode) = viewModelScope.launch { repo.setPriorityMode(m) }
     fun setAutoStart(b: Boolean) = viewModelScope.launch { repo.setAutoStartTimer(b) }
     fun resetProgram() = viewModelScope.launch { repo.resetProgram() }
     fun reopenSetup() = viewModelScope.launch { repo.reopenSetup() }
@@ -129,7 +130,7 @@ fun EditorScreen(repo: WorkoutRepository) {
                         }
                     }
                     HorizontalDivider()
-                    ui.exercises[day.id].orEmpty().forEach { e ->
+                    ru.streetlift.tracker.domain.ProgramOrder.order(day.position, ui.exercises[day.id].orEmpty(), s.priority).forEach { e ->
                         Column(
                             Modifier
                                 .fillMaxWidth()
@@ -141,7 +142,7 @@ fun EditorScreen(repo: WorkoutRepository) {
                                 if (e.mode == ExerciseMode.CALIBRATION) Tag("Калибровка", MaterialTheme.colorScheme.secondary)
                             }
                             Text(
-                                "${Fmt.range(e.minSets, e.maxSets)} × ${Fmt.range(e.minReps, e.maxReps)} · " +
+                                "${Fmt.range(e.minSets, e.maxSets)} × ${Fmt.range(e.minReps, e.maxReps)}${if (e.isSeconds) " с" else ""} · " +
                                     "${Fmt.rir(e.targetRirMin, e.targetRirMax)} · шаг ${Fmt.step(e.weightStep)} кг",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -152,7 +153,7 @@ fun EditorScreen(repo: WorkoutRepository) {
                             }
                             if (e.mode != ExerciseMode.CALIBRATION) {
                                 Text(
-                                    "Сейчас: ${Fmt.weight(e.weightKg)}, ${e.plannedSets} подх., цель ${e.targetReps}+" +
+                                    "Сейчас: ${Fmt.weight(e.weightKg)}, ${e.plannedSets} подх., цель ${e.targetReps}+${if (e.isSeconds) " с" else ""}" +
                                         if (e.emergencyDeloadNext) " · разгрузка на следующей" else "",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.primary,
@@ -183,6 +184,8 @@ fun EditorScreen(repo: WorkoutRepository) {
                             onPlus = { vm.setDeloadEvery(s.deloadEvery + 1) },
                         )
                     }
+                    HorizontalDivider()
+                    ru.streetlift.tracker.ui.common.PrioritySwitch(s.priorityMode, s.priority) { vm.setPriority(it) }
                     HorizontalDivider()
                     val globalDeload = ru.streetlift.tracker.domain.ProgressionEngine.isGlobalDeload(s.cycleInMeso, s.deloadEvery, s.deloadOverride)
                     Row(verticalAlignment = Alignment.CenterVertically) {

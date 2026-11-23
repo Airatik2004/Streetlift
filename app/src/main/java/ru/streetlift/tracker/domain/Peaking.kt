@@ -60,13 +60,30 @@ object Peaking {
         isPeakTarget: Boolean,
         bodyWeight: Float? = null,
     ): SessionPlan? {
+        val plan = resolveReps(config, state, type, globalDeload, phase, isPeakTarget, bodyWeight) ?: return null
+        // Статика: диапазоны повторов пика (3–5, 2–4…) не подходят — секунды берём из коридора упражнения,
+        // в тонусе — минимум коридора
+        if (!config.isSeconds || phase == PeakPhase.NONE || plan.isCalibration) return plan
+        val max = if (phase == PeakPhase.TONUS || phase == PeakPhase.REST) config.minReps else config.maxReps
+        return plan.copy(repsMin = config.minReps, repsMax = max, targetReps = config.minReps)
+    }
+
+    private fun resolveReps(
+        config: ExerciseConfig,
+        state: PlanState,
+        type: ExerciseType,
+        globalDeload: Boolean,
+        phase: PeakPhase,
+        isPeakTarget: Boolean,
+        bodyWeight: Float? = null,
+    ): SessionPlan? {
         val base = ProgressionEngine.sessionPlan(config, state, globalDeload)
         val planned = state.plannedSets.coerceAtLeast(1)
         val w = state.weightKg
         return when (phase) {
             PeakPhase.NONE -> base
             // 0–2 дня: полный отдых; если всё же тренироваться — лёгкий тонус только пиковых
-            PeakPhase.REST -> resolve(config, state, type, globalDeload, PeakPhase.TONUS, isPeakTarget, bodyWeight)?.copy(peakPhase = phase)
+            PeakPhase.REST -> resolveReps(config, state, type, globalDeload, PeakPhase.TONUS, isPeakTarget, bodyWeight)?.copy(peakPhase = phase)
             PeakPhase.PRE_PEAK -> if (isPeakTarget) {
                 SessionPlan(
                     weightKg = ProgressionEngine.roundWeight(w + config.weightStep),

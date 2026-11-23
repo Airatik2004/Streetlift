@@ -77,17 +77,37 @@ class TimerService : Service() {
                 wasFinished = st.finished
             }
         }
+        // Секундомер и интервалы вкладки «Таймер» — тоже в шторке
+        scope.launch {
+            Stopwatch.state.collect { sw ->
+                if (sw.running) holdWakeLock(120_000)
+                val st = RestTimer.state.value
+                if (st.idle && !keepAlive()) shutdown() else updateNotification(st)
+            }
+        }
+        scope.launch {
+            IntervalTimer.state.collect { iv ->
+                if (iv.running) holdWakeLock(iv.remainingMs + 120_000)
+                val st = RestTimer.state.value
+                if (st.idle && !keepAlive()) shutdown() else updateNotification(st)
+            }
+        }
         // Изменения тренировки (подход записан/откатан) — обновить уведомление
         scope.launch {
             ActiveWorkout.result.collect {
                 val st = RestTimer.state.value
-                if (st.idle && !workoutActive()) shutdown() else updateNotification(st)
+                if (st.idle && !keepAlive()) shutdown() else updateNotification(st)
             }
         }
     }
 
     /** Идёт тренировка — уведомление висит всё время, а не только во время отдыха. */
     private fun workoutActive() = ActiveWorkout.sessionId.value != null
+
+    private fun extrasActive() = Stopwatch.state.value.active || IntervalTimer.state.value.active
+
+    /** Сервис нужен: тренировка, секундомер или интервалы. */
+    private fun keepAlive() = workoutActive() || extrasActive()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Всегда сначала уходим в foreground — иначе система убьёт сервис.
@@ -96,6 +116,10 @@ class TimerService : Service() {
         when (intent?.action) {
             ACTION_PREV -> ActiveWorkout.prev(this)
             ACTION_NEXT -> ActiveWorkout.next(this, byPlan = true)
+            ACTION_SW_TOGGLE -> Stopwatch.toggle(this)
+            ACTION_SW_STOP -> Stopwatch.reset()
+            ACTION_IV_TOGGLE -> IntervalTimer.toggle()
+            ACTION_IV_STOP -> IntervalTimer.stop()
             ACTION_TOGGLE -> if (workoutActive()) ActiveWorkout.toggle(this) else RestTimer.toggle()
             ACTION_PLUS -> RestTimer.add(15_000)
             ACTION_MINUS -> RestTimer.add(-15_000)
@@ -105,7 +129,7 @@ class TimerService : Service() {
                 shutdown()
             }
         }
-        if (RestTimer.state.value.idle && !workoutActive()) shutdown()
+        if (RestTimer.state.value.idle && !keepAlive()) shutdown()
         return START_NOT_STICKY
     }
 
@@ -129,7 +153,7 @@ class TimerService : Service() {
             onTimerFinished(st)
             return
         }
-        if (st.idle && !workoutActive()) {
+        if (st.idle && !keepAlive()) {
             shutdown()
             return
         }
@@ -170,7 +194,9 @@ class TimerService : Service() {
         // Время в заголовке — обновляем раз в секунду
         val r = ActiveWorkout.result.value
         val key = "${st.running}|${st.finished}|${st.idle}|${st.label}|${st.info}|${st.totalMs}|${st.remainingSeconds}|" +
-            "${r?.stepKey}|${r?.resting}|${r?.doneSets}|${r?.plannedSets}|${r?.canUndo}"
+            "${r?.stepKey}|${r?.resting}|${r?.doneSets}|${r?.plannedSets}|${r?.canUndo}|" +
+            Stopwatch.state.value.let { "${it.active}|${it.running}|${it.countdown}|${it.seconds}" } + "|" +
+            IntervalTimer.state.value.let { "${it.phase}|${it.round}|${it.running}|${it.remainingSeconds}" }
         // Во время отсчёта уведомление само тикает (chronometer), обновляем только при изменениях
         if (key == lastKey) return
         lastKey = key
@@ -181,14 +207,18 @@ class TimerService : Service() {
     private fun planLine(r: PlanResult): String {
         val cur = r.current ?: return "Откройте приложение, чтобы завершить тренировку"
         val p = cur.plan
-        return if (p.isCalibration) "Калибровка · ${Fmt.range(p.repsMin, p.repsMax)} повт. · RIR ${p.rirMin}"
-        else "${Fmt.weight(p.weightKg)} · ${Fmt.range(p.repsMin, p.repsMax)} повт. · ${Fmt.rir(p.rirMin, p.rirMax)}"
+        val u = if (cur.exercise.isSeconds) "с" else "повт."
+        return if (p.isCalibration) "Калибровка · ${Fmt.range(p.repsMin, p.repsMax)} $u · RIR ${p.rirMin}"
+        else "${Fmt.weight(p.weightKg)} · ${Fmt.range(p.repsMin, p.repsMax)} $u · ${Fmt.rir(p.rirMin, p.rirMax)}"
     }
 
     private fun buildOngoing(st: RestTimer.State): Notification {
         val r = ActiveWorkout.result.value
         val timerActive = st.running || (!st.idle && !st.finished)
         val workStep = r != null && !timerActive
+        val iv = IntervalTimer.state.value
+        val sw = Stopwatch.state.value
+        if (!timerActive && r == null && (iv.active || sw.active)) return buildExtras(iv, sw)
 
         // Формат как у интервальных таймеров: крупно — время/упражнение, ниже — что дальше, полоса прогресса
         val title: String
@@ -238,6 +268,38 @@ class TimerService : Service() {
         } else if (!st.finished) {
             b.addAction(0, if (st.running) "Пауза" else "Старт", actionIntent(ACTION_TOGGLE, 1))
             b.addAction(0, "Стоп", actionIntent(ACTION_STOP, 3))
+        }
+        return b.build()
+    }
+
+    /** Уведомление вкладки «Таймер»: интервалы или секундомер. */
+    private fun buildExtras(iv: IntervalTimer.State, sw: Stopwatch.State): Notification {
+        val b = NotificationCompat.Builder(this, CH_RUNNING)
+            .setSmallIcon(R.drawable.ic_stat_timer)
+            .setColor(0xFF2196F3.toInt())
+            .setColorized(true)
+            .setShowWhen(false)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setCategory(NotificationCompat.CATEGORY_STOPWATCH)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setContentIntent(openAppIntent())
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+        if (iv.active) {
+            b.setContentTitle("${iv.phase.title} · ${Fmt.clock(iv.remainingSeconds)}" + if (!iv.running) " · пауза" else "")
+                .setContentText("Раунд ${iv.round} из ${iv.rounds}")
+                .setSubText("Интервалы")
+                .setProgress(1000, ((1f - iv.progress) * 1000).toInt(), false)
+                .addAction(0, if (iv.running) "Пауза" else "Продолжить", actionIntent(ACTION_IV_TOGGLE, 7))
+                .addAction(0, "Стоп", actionIntent(ACTION_IV_STOP, 8))
+        } else {
+            val title = if (sw.countdown > 0) "Старт через ${sw.countdown}" else Fmt.clock(sw.seconds)
+            b.setContentTitle(title + if (!sw.active) " · пауза" else "")
+                .setContentText(if (sw.laps.isEmpty()) "Секундомер" else "Отсечек: ${sw.laps.size}")
+                .setSubText("Секундомер")
+                .addAction(0, if (sw.active) "Пауза" else "Продолжить", actionIntent(ACTION_SW_TOGGLE, 9))
+                .addAction(0, "Сброс", actionIntent(ACTION_SW_STOP, 10))
         }
         return b.build()
     }
@@ -445,6 +507,10 @@ class TimerService : Service() {
         const val ACTION_STOP = "ru.streetlift.tracker.timer.STOP"
         const val ACTION_PREV = "ru.streetlift.tracker.timer.PREV"
         const val ACTION_NEXT = "ru.streetlift.tracker.timer.NEXT"
+        const val ACTION_SW_TOGGLE = "ru.streetlift.tracker.timer.SW_TOGGLE"
+        const val ACTION_SW_STOP = "ru.streetlift.tracker.timer.SW_STOP"
+        const val ACTION_IV_TOGGLE = "ru.streetlift.tracker.timer.IV_TOGGLE"
+        const val ACTION_IV_STOP = "ru.streetlift.tracker.timer.IV_STOP"
 
         fun createChannels(context: Context) {
             val nm = context.getSystemService(NotificationManager::class.java)

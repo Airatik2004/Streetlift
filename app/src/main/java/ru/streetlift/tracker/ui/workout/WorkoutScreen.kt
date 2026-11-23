@@ -248,7 +248,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                             )
                             if (log != null) {
                                 Text(
-                                    "${Fmt.weight(log.weightKg).removeSuffix(" кг")} × ${log.reps} · ${Fmt.rirValue(log.rir)} ✓",
+                                    "${Fmt.weight(log.weightKg).removeSuffix(" кг")} × ${log.reps}${if (log.isSeconds) " с" else ""} · ${Fmt.rirValue(log.rir)} ✓",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = DeloadGreen,
                                 )
@@ -371,8 +371,8 @@ private fun RestPanel(timer: RestTimer.State, ui: WorkoutUi) {
         textAlign = TextAlign.Center,
     )
     Text(
-        if (cur.plan.isCalibration) "Калибровка · ${Fmt.range(cur.plan.repsMin, cur.plan.repsMax)} повт. · RIR ${cur.plan.rirMin}"
-        else "${Fmt.weight(cur.plan.weightKg)} · ${Fmt.range(cur.plan.repsMin, cur.plan.repsMax)} повт. · ${Fmt.rir(cur.plan.rirMin, cur.plan.rirMax)}",
+        if (cur.plan.isCalibration) "Калибровка · ${Fmt.range(cur.plan.repsMin, cur.plan.repsMax)} ${if (cur.exercise.isSeconds) "с" else "повт."} · RIR ${cur.plan.rirMin}"
+        else "${Fmt.weight(cur.plan.weightKg)} · ${Fmt.range(cur.plan.repsMin, cur.plan.repsMax)} ${if (cur.exercise.isSeconds) "с" else "повт."} · ${Fmt.rir(cur.plan.rirMin, cur.plan.rirMax)}",
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -395,6 +395,7 @@ private fun WorkPanel(
     val cur = ui.current ?: return
     val plan = cur.plan
     val step = cur.exercise.weightStep
+    val unit = if (cur.exercise.isSeconds) "с" else "повт."
     var editWeight by remember { mutableStateOf(false) }
     var editReps by remember { mutableStateOf(false) }
 
@@ -432,8 +433,8 @@ private fun WorkPanel(
         TextButton(onClick = { onSets(1) }, enabled = cur.plannedCount < cur.maxCount) { Text("+", fontSize = 20.sp) }
     }
     Text(
-        if (plan.isCalibration) "Калибровка: подберите вес/стадию на ${Fmt.range(plan.repsMin, plan.repsMax)} повт. с запасом ${plan.rirMin}"
-        else "${Fmt.weight(plan.weightKg)} · ${Fmt.range(plan.repsMin, plan.repsMax)} повт. (цель ${plan.targetReps}+) · ${Fmt.rir(plan.rirMin, plan.rirMax)}",
+        if (plan.isCalibration) "Калибровка: подберите вес/стадию на ${Fmt.range(plan.repsMin, plan.repsMax)} $unit с запасом ${plan.rirMin}"
+        else "${Fmt.weight(plan.weightKg)} · ${Fmt.range(plan.repsMin, plan.repsMax)} ${unit} (цель ${plan.targetReps}+) · ${Fmt.rir(plan.rirMin, plan.rirMax)}",
         style = MaterialTheme.typography.bodyMedium,
         textAlign = TextAlign.Center,
     )
@@ -464,15 +465,23 @@ private fun WorkPanel(
         onValueClick = { editWeight = true },
     )
     Spacer(Modifier.height(6.dp))
+    if (cur.exercise.isSeconds) {
+        HoldStopwatch(onResult = onReps)
+        Spacer(Modifier.height(6.dp))
+    }
     Stepper(
-        label = "Повторы",
+        label = if (cur.exercise.isSeconds) "Секунды (±1)" else "Повторы",
         value = reps.toString(),
         onMinus = { onReps((reps - 1).coerceAtLeast(0)) },
         onPlus = { onReps(reps + 1) },
         onValueClick = { editReps = true },
     )
     Spacer(Modifier.height(8.dp))
-    Text("Запас (RIR)", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(
+        if (cur.exercise.isSeconds) "Запас, сек до потери геометрии (RIR)" else "Запас (RIR)",
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         (0..5).forEach { v ->
             FilterChip(selected = rir == v, onClick = { onRir(v) }, label = { Text(Fmt.rirValue(v)) })
@@ -484,4 +493,41 @@ private fun WorkPanel(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 6.dp),
     )
+}
+
+/**
+ * Секундомер подхода для статики: задержка старта и пики — из настроек секундомера вкладки «Таймер».
+ * «Стоп» подставляет секунды в результат; экран не гаснет, пока идёт удержание.
+ */
+@Composable
+private fun HoldStopwatch(onResult: (Int) -> Unit) {
+    val ctx = LocalContext.current
+    val sw by ru.streetlift.tracker.timer.Stopwatch.state.collectAsStateWithLifecycle()
+    val mine = sw.owner == "hold"
+    ru.streetlift.tracker.ui.timer.KeepScreenOn(mine && sw.active)
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when {
+                    mine && sw.countdown > 0 -> "Старт через ${sw.countdown}"
+                    mine -> ru.streetlift.tracker.ui.timer.formatStopwatch(sw.elapsedMs)
+                    else -> "00:00.0"
+                },
+                style = TimerDigits.copy(fontSize = 32.sp),
+                modifier = Modifier.weight(1f),
+            )
+            if (mine && sw.active) {
+                Button(onClick = {
+                    val secs = ru.streetlift.tracker.timer.Stopwatch.stop()
+                    ru.streetlift.tracker.timer.Stopwatch.reset()
+                    onResult(secs)
+                }) { Text("Стоп") }
+            } else {
+                Button(onClick = {
+                    ru.streetlift.tracker.timer.Stopwatch.reset()
+                    ru.streetlift.tracker.timer.Stopwatch.start(ctx, owner = "hold")
+                }) { Text("Старт") }
+            }
+        }
+    }
 }

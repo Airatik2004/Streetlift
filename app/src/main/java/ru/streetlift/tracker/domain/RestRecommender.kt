@@ -20,6 +20,8 @@ object RestRecommender {
                 90 to "Многоповторка / закачка: 1:30 — короткий отдых держит памп"
             ExerciseType.ACCESSORY ->
                 120 to "Подсобка: 2:00"
+            ExerciseType.STATIC_HOLD ->
+                180 to "Статика: 3:00 — удержание на пределе требует полного восстановления"
         }
         return if (deload) {
             RestRecommendation((base - DELOAD_CUT_SECONDS).coerceAtLeast(30), "$reason · разгрузка: −0:30")

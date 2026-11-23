@@ -18,6 +18,7 @@ import ru.streetlift.tracker.domain.CycleState
 import ru.streetlift.tracker.domain.DeloadOverride
 import ru.streetlift.tracker.domain.ExerciseMode
 import ru.streetlift.tracker.domain.PeakPhase
+import ru.streetlift.tracker.domain.PriorityMode
 import ru.streetlift.tracker.domain.Peaking
 import ru.streetlift.tracker.domain.StageGroups
 import ru.streetlift.tracker.domain.ExerciseType
@@ -49,6 +50,7 @@ class WorkoutRepository(private val db: AppDatabase) {
     suspend fun getSettings(): SettingsEntity = settingsDao.get() ?: SettingsEntity()
     suspend fun getSession(id: Long): SessionEntity? = sessionDao.getSession(id)
     suspend fun getExercisesForDay(dayId: Long): List<ExerciseEntity> = programDao.getExercisesForDay(dayId)
+    suspend fun getDay(id: Long): DayEntity? = programDao.getDay(id)
 
     private fun today(): Long = LocalDate.now().toEpochDay()
 
@@ -82,6 +84,7 @@ class WorkoutRepository(private val db: AppDatabase) {
                 alternating = day.alternating,
                 peakPhase = phase.takeIf { it != PeakPhase.NONE }?.name,
                 peakIds = s.peakExerciseIds.takeIf { phase != PeakPhase.NONE },
+                priority = s.priority.name,
             ),
         )
     }
@@ -115,7 +118,9 @@ class WorkoutRepository(private val db: AppDatabase) {
             it.withState(ProgressionEngine.onStageChanged(it.toState()))
         }
         if (recalibrate.isNotEmpty()) programDao.updateExercises(recalibrate)
-        settingsDao.upsert(s.copy(peakEpochDay = null, peakExerciseIds = "", cycleInMeso = 1, deloadOverride = DeloadOverride.AUTO))
+        settingsDao.upsert(
+            s.copy(peakEpochDay = null, peakExerciseIds = "", cycleInMeso = 1, deloadOverride = DeloadOverride.AUTO, mesoIndex = s.mesoIndex + 1),
+        )
     }
 
     suspend fun logSet(set: SetLogEntity) {
@@ -217,6 +222,7 @@ class WorkoutRepository(private val db: AppDatabase) {
                 currentDayIndex = adv.state.dayIndex,
                 cycleInMeso = adv.state.cycleInMeso,
                 completedRounds = adv.state.completedRounds,
+                mesoIndex = if (adv.roundCompleted && adv.state.cycleInMeso == 1) s.mesoIndex + 1 else s.mesoIndex,
                 deloadOverride = adv.state.override,
                 nextWorkoutEpochDay = today() + 2, // через день отдыха
             ),
@@ -249,6 +255,7 @@ class WorkoutRepository(private val db: AppDatabase) {
                 currentDayIndex = adv.state.dayIndex,
                 cycleInMeso = adv.state.cycleInMeso,
                 completedRounds = adv.state.completedRounds,
+                mesoIndex = if (adv.roundCompleted && adv.state.cycleInMeso == 1) s.mesoIndex + 1 else s.mesoIndex,
                 deloadOverride = adv.state.override,
                 nextWorkoutEpochDay = null,
             ),
@@ -298,6 +305,10 @@ class WorkoutRepository(private val db: AppDatabase) {
     suspend fun setDeload(want: Boolean) {
         val s = getSettings()
         settingsDao.upsert(s.copy(deloadOverride = ProgressionEngine.overrideFor(want, s.cycleInMeso, s.deloadEvery)))
+    }
+
+    suspend fun setPriorityMode(mode: PriorityMode) {
+        settingsDao.upsert(getSettings().copy(priorityMode = mode))
     }
 
     suspend fun setDeloadEvery(n: Int) {
@@ -465,9 +476,12 @@ class WorkoutRepository(private val db: AppDatabase) {
     }
 
     /** Полная замена базы содержимым JSON. Бросает исключение при неверном формате. */
+    /**
+     * Импорт бэкапа. Программа зашита в коде, поэтому дни/упражнения берутся из шаблона,
+     * а веса, стадии и прогресс переносятся по названию. История — целиком.
+     */
     suspend fun importJson(text: String) {
         val data = BackupJson.decode(text)
-        require(data.days.isNotEmpty()) { "В файле нет дней цикла" }
         db.withTransaction {
             sessionDao.clearSets()
             sessionDao.clearSessions()
@@ -475,21 +489,39 @@ class WorkoutRepository(private val db: AppDatabase) {
             programDao.clearDays()
             programDao.clearStages()
             programDao.clearArchive()
-            // Справочники стадий встроенные (свои варианты убраны) — всегда актуальные
             programDao.insertStages(DefaultTemplate.builtInStages())
-            programDao.insertArchives(data.stageArchive)
-            programDao.insertDays(data.days)
-            // Старые бэкапы без групп стадий — группа по названию упражнения
-            programDao.insertExercises(
-                data.exercises.map { e -> if (e.stageGroup == null) e.copy(stageGroup = StageGroups.groupForName(e.name)) else e },
+            DefaultTemplate.seedProgram(programDao)
+
+            val oldByName = data.exercises.associateBy { DefaultTemplate.renamed[it.name] ?: it.name }
+            val validStages = DefaultTemplate.builtInStages().groupBy({ it.groupKey }, { it.name })
+            val restored = programDao.getAllExercises().map { e ->
+                val old = oldByName[e.name] ?: return@map e
+                val stage = old.leverageStage?.takeIf { st -> e.stageGroup != null && st in validStages[e.stageGroup].orEmpty() }
+                e.withState(old.toState()).copy(
+                    leverageStage = stage ?: e.leverageStage,
+                    plannedSets = old.plannedSets.coerceIn(maxOf(1, e.minSets - 1), e.maxSets),
+                    targetReps = old.targetReps.coerceIn(e.minReps, e.maxReps),
+                )
+            }
+            programDao.updateExercises(restored)
+
+            // Ссылки истории на упражнения — по названию в новой программе
+            val newIdByName = restored.associate { it.name to it.id }
+            val dayIdByName = programDao.getDays().associate { it.name to it.id }
+            sessionDao.insertSessions(data.sessions.map { it.copy(dayId = dayIdByName[it.dayName]) })
+            sessionDao.insertSets(
+                data.sets.map { st ->
+                    val name = DefaultTemplate.renamed[st.exerciseName] ?: st.exerciseName
+                    st.copy(exerciseId = newIdByName[name], exerciseName = name)
+                },
             )
-            sessionDao.insertSessions(data.sessions)
-            sessionDao.insertSets(data.sets)
+            programDao.insertArchives(data.stageArchive)
+            val days = programDao.getDays()
             settingsDao.upsert(
                 data.settings.copy(
                     id = 1,
                     setupDone = true,
-                    currentDayIndex = data.settings.currentDayIndex.coerceIn(0, data.days.size - 1),
+                    currentDayIndex = data.settings.currentDayIndex.coerceIn(0, days.size - 1),
                 ),
             )
         }

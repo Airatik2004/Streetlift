@@ -14,7 +14,12 @@ data class ExerciseConfig(
     val targetRirMin: Int,
     val targetRirMax: Int,
     val weightStep: Float,
-)
+    /** Статика: minReps..maxReps — секунды удержания, цель растёт на +2 с за цикл. */
+    val isSeconds: Boolean = false,
+) {
+    val unit: String get() = if (isSeconds) "с" else "повт."
+    val targetStep: Int get() = if (isSeconds) 2 else 1
+}
 
 /** Состояние плана, которое движок пересчитывает после каждой тренировки. */
 data class PlanState(
@@ -301,7 +306,7 @@ object ProgressionEngine {
                     avgRir >= config.targetRirMin -> config.maxSets
                     else -> planned
                 }.coerceIn(1, max(1, config.maxSets))
-                val newTarget = (minAchieved + 1).coerceIn(config.minReps, max(config.minReps, config.maxReps))
+                val newTarget = (minAchieved + config.targetStep).coerceIn(config.minReps, max(config.minReps, config.maxReps))
                 next = state.copy(
                     weightKg = work,
                     plannedSets = newSets,
@@ -318,9 +323,9 @@ object ProgressionEngine {
                 msg = if (reduced) {
                     "подходов меньше плана (${sets.size} из $planned) — объём не растёт, держим ${Fmt.weight(work)}"
                 } else if (decision == Decision.ADD_VOLUME) {
-                    "объём ↑ до $newSets подходов, вес ${Fmt.weight(work)}, цель ${newTarget}+ повт."
+                    "объём ↑ до $newSets подходов, вес ${Fmt.weight(work)}, цель ${newTarget}+ ${config.unit}"
                 } else {
-                    "держим ${Fmt.weight(work)}, $newSets подходов, цель ${newTarget}+ повт."
+                    "держим ${Fmt.weight(work)}, $newSets подходов, цель ${newTarget}+ ${config.unit}"
                 }
             }
         }

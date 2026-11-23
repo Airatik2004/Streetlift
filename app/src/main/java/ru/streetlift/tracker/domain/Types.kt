@@ -6,6 +6,32 @@ enum class ExerciseType(val title: String) {
     HEAVY_LEVER("Тяжёлая сила / рычаг"),
     HYPERTROPHY_PUMP("Многоповторка / закачка"),
     ACCESSORY("Подсобка / ноги"),
+    STATIC_HOLD("Статика (удержание)"),
+}
+
+/** Чем меряется подход: повторы или секунды удержания. */
+enum class Metric { REPS, SECONDS }
+
+/** Приоритет дней 2–4: что идёт первым. */
+enum class Priority(val title: String) { PRESS("Жим"), PULL("Тяга") }
+
+/** Режим приоритета: вручную или «Авто» — чередование по мезоциклам (начинаем с жима). */
+enum class PriorityMode(val title: String) {
+    PRESS("Жим"), PULL("Тяга"), AUTO("Авто");
+
+    fun effective(mesoIndex: Int): Priority = when (this) {
+        PRESS -> Priority.PRESS
+        PULL -> Priority.PULL
+        AUTO -> if (mesoIndex % 2 == 0) Priority.PRESS else Priority.PULL
+    }
+}
+
+/** Порядок упражнений дня с учётом приоритета: в днях 2–4 при «Тяге» первые два меняются местами. */
+object ProgramOrder {
+    fun <T> order(dayPosition: Int, items: List<T>, priority: Priority): List<T> =
+        if (priority == Priority.PULL && dayPosition in 1..3 && items.size >= 2) {
+            listOf(items[1], items[0]) + items.drop(2)
+        } else items
 }
 
 /** Ручное управление плановой разгрузкой на текущий круг. */

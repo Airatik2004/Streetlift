@@ -74,7 +74,7 @@ fun SetEditDialog(
                 OutlinedTextField(
                     value = reps,
                     onValueChange = { reps = it.filter(Char::isDigit).take(3) },
-                    label = { Text("Повторы") },
+                    label = { Text(if (log.isSeconds) "Секунды" else "Повторы") },
                     singleLine = true,
                     isError = r == null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),

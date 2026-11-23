@@ -21,5 +21,6 @@ class StreetLiftApp : Application() {
         repository = WorkoutRepository(AppDatabase.build(this))
         appScope.launch { repository.ensureSeeded() }
         TimerService.createChannels(this)
+        ru.streetlift.tracker.timer.Beeper.init(this)
     }
 }

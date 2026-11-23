@@ -242,6 +242,7 @@ fun EditorScreen(repo: WorkoutRepository) {
         CalibrationDialog(
             exercise = e,
             stages = ui.stages.filter { it.groupKey == e.stageGroup },
+            deloadEvery = s.deloadEvery,
             onDismiss = { editExercise = null },
             onSave = {
                 vm.saveExercise(it)
@@ -256,6 +257,7 @@ fun EditorScreen(repo: WorkoutRepository) {
 private fun CalibrationDialog(
     exercise: ExerciseEntity,
     stages: List<StageEntity>,
+    deloadEvery: Int,
     onDismiss: () -> Unit,
     onSave: (ExerciseEntity) -> Unit,
 ) {
@@ -320,7 +322,8 @@ private fun CalibrationDialog(
                     Column(Modifier.weight(1f)) {
                         Text("Пропустить плановую разгрузку", style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "ближайшая своя разгрузка: этот цикл по плану, счёт циклов идёт дальше",
+                            "Этот разгрузочный цикл — без разгрузки. Следующая — через $deloadEvery " +
+                                ru.streetlift.tracker.ui.home.plural(deloadEvery, "цикл", "цикла", "циклов") + ", как обычно",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

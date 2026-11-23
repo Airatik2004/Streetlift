@@ -97,13 +97,13 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
         val day = days.getOrNull(idx)
         val today = LocalDate.now().toEpochDay()
         val workoutDay = maxOf(today, s.nextWorkoutEpochDay ?: today)
-        val phase = Peaking.phaseOn(s.peakEpochDay, workoutDay)
-        val global = ProgressionEngine.isGlobalDeload(s.cycleInMeso, s.deloadEvery, s.deloadOverride) && phase == PeakPhase.NONE
+        val phase = Peaking.phaseOn(s.peakEpochDay, workoutDay, s.peakSpanDays)
+        val global = s.forcedDeload && phase == PeakPhase.NONE
         val peakIds = s.peakIds
         val previews = if (day == null) emptyList() else ru.streetlift.tracker.domain.ProgramOrder.order(
             day.position, exs.filter { it.dayId == day.id }.sortedBy { it.position }, s.priority,
         )
-            .map { ExercisePreview(it, Peaking.resolve(it.toConfig(), it.toState(), it.type, global && !it.plannedDeloadExempt, phase, it.id in peakIds, s.bodyWeightKg)) }
+            .map { ExercisePreview(it, Peaking.resolve(it.toConfig(), it.toState(), it.type, phase == PeakPhase.NONE && it.plannedDeload(s.deloadEvery, global), phase, it.id in peakIds, s.bodyWeightKg)) }
         val dayOrder = days.associate { it.id to it.position }
         HomeUiState(
             loading = false,
@@ -189,17 +189,14 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
         item {
             Column {
                 Text("Дневник тренировок", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                // Мезоцикл одной строкой; разгрузку выбирают во вкладке «Цикл»
-                val left = (s.deloadEvery - s.cycleInMeso).coerceAtLeast(0)
-                val deloadText = when {
-                    ui.phase != PeakPhase.NONE -> "выход на пик"
-                    ui.globalDeload -> "разгрузка"
-                    left == 0 -> "плановая разгрузка отменена"
-                    else -> "разгрузка через $left ${plural(left, "цикл", "цикла", "циклов")}"
+                // Разгрузка у каждого упражнения своя — в шапке только общий номер цикла
+                val extra = when {
+                    ui.phase != PeakPhase.NONE -> " · выход на пик"
+                    ui.globalDeload -> " · разгрузка всего цикла"
+                    else -> ""
                 }
                 Text(
-                    "Цикл ${s.cycleInMeso.coerceAtMost(s.deloadEvery)} из ${s.deloadEvery} · " +
-                        "день ${ui.nextDayIndex + 1} из ${ui.days.size} · $deloadText",
+                    "Цикл ${s.completedRounds + 1} · день ${ui.nextDayIndex + 1} из ${ui.days.size}$extra",
                     style = MaterialTheme.typography.bodyLarge,
                     color = if (ui.globalDeload) DeloadGreen else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -260,7 +257,7 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
 
                         ui.previews.forEachIndexed { i, p ->
                             if (i > 0) HorizontalDivider()
-                            PreviewRow(p, ui.globalDeload)
+                            PreviewRow(p, ui.globalDeload, s.deloadEvery, ui.phase == PeakPhase.NONE)
                         }
                         if (ui.previews.isEmpty()) {
                             Text("В этом дне пока нет упражнений — добавьте их во вкладке «Цикл».")
@@ -357,7 +354,7 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
 }
 
 @Composable
-private fun PreviewRow(p: ExercisePreview, globalDeload: Boolean) {
+private fun PreviewRow(p: ExercisePreview, globalDeload: Boolean, deloadEvery: Int, normalPhase: Boolean) {
     val e = p.exercise
     val plan = p.plan
     if (plan == null) {
@@ -375,7 +372,7 @@ private fun PreviewRow(p: ExercisePreview, globalDeload: Boolean) {
                 plan.isCalibration -> Tag("Калибровка", MaterialTheme.colorScheme.secondary)
                 plan.isEmergencyDeload -> Tag("Авар. разгрузка", WarnOrange)
                 plan.isDeload -> Tag("Разгрузка", DeloadGreen)
-                globalDeload && e.plannedDeloadExempt -> Tag(ru.streetlift.tracker.ui.editor.deloadExemptLabel(e), DeloadGreen)
+                normalPhase && !globalDeload && e.deloadDue(deloadEvery) && e.skipPlannedDeload == true -> Tag("Без разгрузки", DeloadGreen)
             }
         }
         e.leverageStage?.let {
@@ -404,6 +401,11 @@ private fun PreviewRow(p: ExercisePreview, globalDeload: Boolean) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (normalPhase && !plan.isDeload && !plan.isEmergencyDeload) {
+                ru.streetlift.tracker.ui.editor.deloadInText(e, deloadEvery)?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
     }
 }
@@ -476,9 +478,19 @@ private fun PeakDialog(
     var bw by remember { mutableStateOf(initialBodyWeight?.let { Fmt.step(it) } ?: "") }
     var ids by remember { mutableStateOf(initialIds) }
     var picking by remember { mutableStateOf(false) }
+    val today = LocalDate.now().toEpochDay()
+    val minDay = today + Peaking.MIN_SPAN
+    // Уже выставленную дату можно оставить, новую — не ближе 7 дней
+    val dayOk = day >= minDay || day == initialDay && initialIds.isNotEmpty()
 
     if (picking) {
-        val state = androidx.compose.material3.rememberDatePickerState(initialSelectedDateMillis = day * 86_400_000L)
+        val state = androidx.compose.material3.rememberDatePickerState(
+            initialSelectedDateMillis = maxOf(day, minDay) * 86_400_000L,
+            selectableDates = object : androidx.compose.material3.SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean = utcTimeMillis / 86_400_000L >= minDay
+                override fun isSelectableYear(year: Int): Boolean = year >= LocalDate.ofEpochDay(minDay).year
+            },
+        )
         androidx.compose.material3.DatePickerDialog(
             onDismissRequest = { picking = false },
             confirmButton = {
@@ -503,6 +515,16 @@ private fun PeakDialog(
                 OutlinedButton(onClick = { picking = true }, modifier = Modifier.fillMaxWidth()) {
                     Text("Дата: " + LocalDate.ofEpochDay(day).format(peakDateFmt))
                 }
+                val left = day - today
+                Text(
+                    when {
+                        !dayOk -> "Ближе 7 дней выбрать нельзя — выберите другую дату."
+                        left < Peaking.FULL_SPAN -> "До пика $left ${plural(left.toInt(), "день", "дня", "дней")} — меньше 22, подготовка будет ускоренной: отдых и тонус полностью, остальное сокращается. Ближе 7 дней выбрать нельзя."
+                        else -> "Полная подготовка начнётся за 22 дня до даты. Ближе 7 дней выбрать нельзя."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (!dayOk || left < Peaking.FULL_SPAN) WarnOrange else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 androidx.compose.material3.OutlinedTextField(
                     value = bw,
                     onValueChange = { bw = it },
@@ -544,7 +566,7 @@ private fun PeakDialog(
         confirmButton = {
             TextButton(
                 onClick = { onSave(day, ids, bw.replace(',', '.').toFloatOrNull()?.takeIf { it > 0f }) },
-                enabled = day >= LocalDate.now().toEpochDay(),
+                enabled = dayOk,
             ) { Text("Сохранить") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },

@@ -76,7 +76,7 @@ class WorkoutRepository(private val db: AppDatabase) {
                     it.withState(src.toState()).copy(
                         leverageStage = src.leverageStage,
                         skipPlannedDeload = src.skipPlannedDeload,
-                        cyclesSinceStage = src.cyclesSinceStage,
+                        deloadSessions = src.deloadSessions,
                     )
                 }
         }
@@ -89,16 +89,15 @@ class WorkoutRepository(private val db: AppDatabase) {
         sessionDao.getActive()?.let { return@withTransaction it.id }
         val s = getSettings()
         val day = programDao.getDay(dayId) ?: error("День не найден")
-        val global = ProgressionEngine.isGlobalDeload(s.cycleInMeso, s.deloadEvery, s.deloadOverride)
-        val phase = Peaking.phaseOn(s.peakEpochDay, today())
+        val phase = Peaking.phaseOn(s.peakEpochDay, today(), s.peakSpanDays)
         sessionDao.insertSession(
             SessionEntity(
                 dayId = day.id,
                 dayName = day.name,
                 startedAt = System.currentTimeMillis(),
                 roundNumber = s.completedRounds + 1,
-                // Подводка перекрывает разгрузку
-                isDeload = global && phase == PeakPhase.NONE,
+                // Общая принудительная разгрузка; плановая — у каждого упражнения своя. Подводка перекрывает
+                isDeload = s.forcedDeload && phase == PeakPhase.NONE,
                 alternating = day.alternating,
                 peakPhase = phase.takeIf { it != PeakPhase.NONE }?.name,
                 peakIds = s.peakExerciseIds.takeIf { phase != PeakPhase.NONE },
@@ -113,6 +112,9 @@ class WorkoutRepository(private val db: AppDatabase) {
         settingsDao.upsert(
             getSettings().copy(
                 peakEpochDay = epochDay,
+                // Дата та же — длина подводки сохраняется, иначе считается от сегодня
+                peakSpanDays = if (getSettings().peakEpochDay == epochDay && getSettings().peakSpanDays != null) getSettings().peakSpanDays
+                else (epochDay - today()).toInt().coerceIn(Peaking.MIN_SPAN, Peaking.FULL_SPAN),
                 peakExerciseIds = exerciseIds.joinToString(","),
                 bodyWeightKg = bodyWeightKg ?: getSettings().bodyWeightKg,
             ),
@@ -120,7 +122,7 @@ class WorkoutRepository(private val db: AppDatabase) {
     }
 
     suspend fun clearPeak() {
-        settingsDao.upsert(getSettings().copy(peakEpochDay = null, peakExerciseIds = ""))
+        settingsDao.upsert(getSettings().copy(peakEpochDay = null, peakExerciseIds = "", peakSpanDays = null))
     }
 
     /**
@@ -132,15 +134,17 @@ class WorkoutRepository(private val db: AppDatabase) {
         val d = s.peakEpochDay ?: return@withTransaction
         if (today() <= d) return@withTransaction
         val ids = s.peakIds
-        val recalibrate = programDao.getAllExercises().filter { it.id in ids }.map {
-            it.withState(ProgressionEngine.onStageChanged(it.toState()))
+        // После старта — новый мезоцикл у всех, пиковые упражнения уходят на калибровку
+        val recalibrate = programDao.getAllExercises().map {
+            if (it.id in ids) it.withState(ProgressionEngine.onStageChanged(it.toState())).copy(deloadSessions = 0, skipPlannedDeload = null)
+            else it.copy(deloadSessions = 0, skipPlannedDeload = null)
         }
         if (recalibrate.isNotEmpty()) {
             programDao.updateExercises(recalibrate)
             syncShared(recalibrate)
         }
         settingsDao.upsert(
-            s.copy(peakEpochDay = null, peakExerciseIds = "", cycleInMeso = 1, deloadOverride = DeloadOverride.AUTO, mesoIndex = s.mesoIndex + 1),
+            s.copy(peakEpochDay = null, peakExerciseIds = "", peakSpanDays = null, cycleInMeso = 1, deloadOverride = DeloadOverride.AUTO, mesoIndex = s.mesoIndex + 1),
         )
     }
 
@@ -211,8 +215,9 @@ class WorkoutRepository(private val db: AppDatabase) {
         if (peak != null) lines += "Выход на пик (${peak.title}) — рабочий план не меняется, результаты в истории."
         val updated = if (peak != null) emptyList() else exercises.map { ex ->
             val exLogs = logs.filter { it.exerciseId == ex.id }
-            // Плановая разгрузка не касается исключённых упражнений (вручную или новая стадия)
-            val wasDeload = (session.isDeload && !ex.plannedDeloadExempt) || ex.emergencyDeloadNext
+            // Своя плановая разгрузка упражнения (или общая принудительная) либо аварийная
+            val planned = ex.plannedDeload(s.deloadEvery, session.isDeload)
+            val wasDeload = planned || ex.emergencyDeloadNext
             val result = ProgressionEngine.computeNext(
                 ex.toConfig(),
                 ex.toState(),
@@ -221,15 +226,24 @@ class WorkoutRepository(private val db: AppDatabase) {
                 stageCeilingEligible = ex.stageCeilingEligible,
             )
             lines += "• ${ex.name}: ${result.message}"
-            // Рабочий цикл на стадии засчитан (круг калибровки не считается)
+            // Счётчик разгрузки упражнения: калибровка не считается
             val worked = exLogs.isNotEmpty() && ex.mode == ExerciseMode.ACTIVE
-            val next = ex.withState(result.state).copy(
-                cyclesSinceStage = if (worked) (ex.cyclesSinceStage + 1).coerceAtMost(99) else ex.cyclesSinceStage,
-            )
+            var sessions = ex.deloadSessions
+            var skip = ex.skipPlannedDeload
+            if (worked) {
+                sessions += 1
+                val mesoEnd = s.deloadEvery > 0 && sessions >= s.deloadEvery * ex.sessionsPerCycle
+                // Аварийная и общая разгрузка тоже дают отдых — мезоцикл упражнения начинается заново
+                if (mesoEnd || ex.emergencyDeloadNext || session.isDeload) {
+                    sessions = 0
+                    skip = null
+                }
+            }
+            val next = ex.withState(result.state).copy(deloadSessions = sessions, skipPlannedDeload = skip)
             // Калибровка фиксирует и стадию последнего рабочего подхода
             if (ex.mode == ExerciseMode.CALIBRATION && exLogs.isNotEmpty()) {
                 val st = exLogs.last().leverageStage ?: ex.leverageStage
-                next.copy(leverageStage = st, cyclesSinceStage = if (st != ex.leverageStage) 0 else next.cyclesSinceStage)
+                next.copy(leverageStage = st, deloadSessions = if (st != ex.leverageStage) 0 else next.deloadSessions)
             } else next
         }
         if (updated.isNotEmpty()) {
@@ -242,18 +256,8 @@ class WorkoutRepository(private val db: AppDatabase) {
             CycleState(s.currentDayIndex, s.cycleInMeso, s.completedRounds, s.deloadOverride),
             dayIndex, days.size, s.deloadEvery,
         )
-        if (adv.roundCompleted && adv.wasDeloadRound) {
-            // Ручные пропуски плановой разгрузки действуют один разгрузочный цикл
-            val reset = programDao.getAllExercises().filter { it.skipPlannedDeload != null }.map { it.copy(skipPlannedDeload = null) }
-            if (reset.isNotEmpty()) programDao.updateExercises(reset)
-        }
         if (adv.roundCompleted) {
-            lines += if (adv.wasDeloadRound) {
-                "Цикл завершён. Разгрузка позади — новый мезоцикл, цикл 1 из ${s.deloadEvery}."
-            } else {
-                "Цикл завершён. Следующий — ${adv.state.cycleInMeso} из ${s.deloadEvery}" +
-                    if (adv.state.cycleInMeso >= s.deloadEvery) " (плановая разгрузка)." else "."
-            }
+            lines += "Цикл ${s.completedRounds + 1} завершён."
         }
         settingsDao.upsert(
             s.withoutUndo().copy(
@@ -342,7 +346,8 @@ class WorkoutRepository(private val db: AppDatabase) {
 
     suspend fun setDeload(want: Boolean) {
         val s = getSettings()
-        settingsDao.upsert(s.copy(deloadOverride = ProgressionEngine.overrideFor(want, s.cycleInMeso, s.deloadEvery)))
+        // Общая разгрузка всего сразу; выключение — обратно к своим разгрузкам упражнений
+        settingsDao.upsert(s.copy(deloadOverride = if (want) DeloadOverride.FORCE_ON else DeloadOverride.AUTO))
     }
 
     suspend fun setPriorityMode(mode: PriorityMode) {
@@ -430,7 +435,7 @@ class WorkoutRepository(private val db: AppDatabase) {
                 ),
             )
         }
-        return edited.withState(ProgressionEngine.onStageChanged(edited.toState())).copy(cyclesSinceStage = 0)
+        return edited.withState(ProgressionEngine.onStageChanged(edited.toState())).copy(deloadSessions = 0)
             .copy(leverageStage = newStage)
     }
 

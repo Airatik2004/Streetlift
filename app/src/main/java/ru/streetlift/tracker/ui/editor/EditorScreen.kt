@@ -148,10 +148,16 @@ fun EditorScreen(repo: WorkoutRepository) {
                             if (e.stageCeiling) {
                                 Tag("Потолок стадии достигнут — можно переходить на следующую стадию", ru.streetlift.tracker.ui.theme.WarnOrange)
                             }
-                            if (e.plannedDeloadExempt && e.mode != ExerciseMode.CALIBRATION &&
-                                ru.streetlift.tracker.domain.ProgressionEngine.isGlobalDeload(s.cycleInMeso, s.deloadEvery, s.deloadOverride)
-                            ) {
-                                Tag(deloadExemptLabel(e), ru.streetlift.tracker.ui.theme.DeloadGreen)
+                            if (e.mode != ExerciseMode.CALIBRATION) {
+                                when {
+                                    s.forcedDeload || e.plannedDeload(s.deloadEvery, false) ->
+                                        Tag("Разгрузка", ru.streetlift.tracker.ui.theme.DeloadGreen)
+                                    e.deloadDue(s.deloadEvery) && e.skipPlannedDeload == true ->
+                                        Tag("Без разгрузки", ru.streetlift.tracker.ui.theme.DeloadGreen)
+                                    else -> deloadInText(e, s.deloadEvery)?.let {
+                                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
                             }
                             if (e.mode != ExerciseMode.CALIBRATION) {
                                 Text(
@@ -174,7 +180,7 @@ fun EditorScreen(repo: WorkoutRepository) {
                         Column(Modifier.weight(1f)) {
                             Text("Плановая разгрузка", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "каждый ${s.deloadEvery}-й цикл",
+                                "каждый ${s.deloadEvery}-й цикл упражнения (у задней дельты цикл — 2 тренировки)",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -189,7 +195,7 @@ fun EditorScreen(repo: WorkoutRepository) {
                     HorizontalDivider()
                     ru.streetlift.tracker.ui.common.PrioritySwitch(s.priorityMode, s.priority) { vm.setPriority(it) }
                     HorizontalDivider()
-                    val globalDeload = ru.streetlift.tracker.domain.ProgressionEngine.isGlobalDeload(s.cycleInMeso, s.deloadEvery, s.deloadOverride)
+                    val globalDeload = s.forcedDeload
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("Разгрузка на этот цикл", style = MaterialTheme.typography.titleMedium)
@@ -256,8 +262,7 @@ private fun CalibrationDialog(
     var stage by remember { mutableStateOf(exercise.leverageStage) }
     var calibrate by remember { mutableStateOf(exercise.mode == ExerciseMode.CALIBRATION) }
     var deload by remember { mutableStateOf(exercise.emergencyDeloadNext) }
-    // null — не трогали (остаётся авто), иначе явный выбор
-    var skipPlanned by remember { mutableStateOf(exercise.skipPlannedDeload) }
+    var skipPlanned by remember { mutableStateOf(exercise.skipPlannedDeload == true) }
     var weight by remember { mutableStateOf(Fmt.weight(exercise.weightKg).removeSuffix(" кг")) }
     var error by remember { mutableStateOf<String?>(null) }
     val stageChanged = stage != exercise.leverageStage
@@ -315,16 +320,12 @@ private fun CalibrationDialog(
                     Column(Modifier.weight(1f)) {
                         Text("Пропустить плановую разгрузку", style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            if (skipPlanned == null && exercise.autoDeloadExempt) {
-                                "Новая стадия: ${exercise.cyclesSinceStage} из 3 циклов — разгрузка пропускается автоматически"
-                            } else {
-                                "только ближайшая плановая разгрузка, потом сбрасывается"
-                            },
+                            "ближайшая своя разгрузка: этот цикл по плану, счёт циклов идёт дальше",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Switch(checked = skipPlanned ?: exercise.autoDeloadExempt, onCheckedChange = { skipPlanned = it })
+                    Switch(checked = skipPlanned, onCheckedChange = { skipPlanned = it })
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
@@ -341,7 +342,7 @@ private fun CalibrationDialog(
                             leverageStage = stage,
                             mode = if (calibrate || stageChanged) ExerciseMode.CALIBRATION else ExerciseMode.ACTIVE,
                             emergencyDeloadNext = deload,
-                            skipPlannedDeload = skipPlanned,
+                            skipPlannedDeload = skipPlanned.takeIf { it },
                         ),
                     )
                 }
@@ -351,7 +352,16 @@ private fun CalibrationDialog(
     )
 }
 
-/** Подпись исключения из плановой разгрузки. */
-internal fun deloadExemptLabel(e: ExerciseEntity): String =
-    if (e.skipPlannedDeload == null && e.autoDeloadExempt) "Без разгрузки — новая стадия (${e.cyclesSinceStage} из 3 циклов)"
-    else "Без разгрузки"
+/** «Разгрузка через k циклов» для упражнения; null — разгрузка выключена или идёт сейчас. */
+internal fun deloadInText(e: ExerciseEntity, every: Int): String? {
+    if (every <= 0) return null
+    val k = e.cyclesToDeload(every)
+    if (k <= 0) return null
+    val w = when {
+        k % 100 in 11..14 -> "циклов"
+        k % 10 == 1 -> "цикл"
+        k % 10 in 2..4 -> "цикла"
+        else -> "циклов"
+    }
+    return "Разгрузка через $k $w"
+}

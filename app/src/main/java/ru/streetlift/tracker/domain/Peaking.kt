@@ -9,18 +9,26 @@ import kotlin.math.roundToInt
  */
 object Peaking {
 
-    fun phase(daysToStart: Long): PeakPhase = when {
+    const val FULL_SPAN = 22
+    const val MIN_SPAN = 7
+
+    /**
+     * Фаза за [daysToStart] дней до старта. Фазы заполняются с конца: отдых 3 дня, тонус 5,
+     * снижение 7, подготовка — остаток. Если пик выставлен за 15–18 дней ([span]),
+     * на подготовку осталось бы 1–3 дня (1 тренировка) — эти дни отходят снижению.
+     */
+    fun phase(daysToStart: Long, span: Int? = null): PeakPhase = when {
         daysToStart < 0 -> PeakPhase.NONE
         daysToStart <= 2 -> PeakPhase.REST
         daysToStart <= 7 -> PeakPhase.TONUS
         daysToStart <= 14 -> PeakPhase.TAPER1
-        daysToStart <= 22 -> PeakPhase.PRE_PEAK
+        daysToStart <= FULL_SPAN -> if (span != null && span <= 18) PeakPhase.TAPER1 else PeakPhase.PRE_PEAK
         else -> PeakPhase.NONE
     }
 
     /** Фаза на день [dayEpoch] при старте [peakEpochDay] (null — подводка выключена). */
-    fun phaseOn(peakEpochDay: Long?, dayEpoch: Long): PeakPhase =
-        if (peakEpochDay == null) PeakPhase.NONE else phase(peakEpochDay - dayEpoch)
+    fun phaseOn(peakEpochDay: Long?, dayEpoch: Long, span: Int? = null): PeakPhase =
+        if (peakEpochDay == null) PeakPhase.NONE else phase(peakEpochDay - dayEpoch, span)
 
     /**
      * Облегчённый вес «~pct от рабочего» для знакового веса.

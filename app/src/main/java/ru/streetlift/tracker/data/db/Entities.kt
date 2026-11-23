@@ -42,7 +42,12 @@ data class SettingsEntity(
     /** Приоритет дней 2–4 и счётчик завершённых мезоциклов (для «Авто»). */
     val priorityMode: PriorityMode = PriorityMode.AUTO,
     val mesoIndex: Int = 0,
+    /** За сколько дней до пика он выставлен (≤ 22): при 15–18 подготовка уходит в снижение. */
+    val peakSpanDays: Int? = null,
 ) {
+    /** Общая «Разгрузка на этот цикл» — разгружает все упражнения сразу. */
+    val forcedDeload: Boolean get() = deloadOverride == DeloadOverride.FORCE_ON
+
     val priority: ru.streetlift.tracker.domain.Priority get() = priorityMode.effective(mesoIndex)
 
     val peakIds: Set<Long> get() = peakExerciseIds.split(',').mapNotNull { it.trim().toLongOrNull() }.toSet()
@@ -108,16 +113,28 @@ data class ExerciseEntity(
     val alwaysLast: Boolean = false,
     /** Одно упражнение в нескольких днях с общим прогрессом (задняя дельта: дни 1 и 3). */
     val shareKey: String? = null,
-    /** Пропуск плановой разгрузки на текущий разгрузочный цикл: null — авто, true — пропустить, false — разгружать. */
+    /** Пропустить ближайшую плановую разгрузку (true); сбрасывается в конце разгрузочного цикла. */
     val skipPlannedDeload: Boolean? = null,
-    /** Рабочих циклов со смены стадии (без круга калибровки); 99 — давно. */
+    /** Не используется (v9), оставлено для совместимости схемы. */
     val cyclesSinceStage: Int = 99,
+    /** Рабочих тренировок упражнения в текущем мезоцикле (калибровка не считается). */
+    val deloadSessions: Int = 0,
 ) {
-    /** Автоисключение: меньше 3 рабочих циклов на новой стадии. */
-    val autoDeloadExempt: Boolean get() = stageGroup != null && cyclesSinceStage < 3
+    /** Тренировок в цикле упражнения: задняя дельта — 2 (дни 1 и 3), остальные — 1. */
+    val sessionsPerCycle: Int get() = if (shareKey != null) 2 else 1
 
-    /** Не разгружать в плановую разгрузку (вручную или автоматически). */
-    val plannedDeloadExempt: Boolean get() = skipPlannedDeload ?: autoDeloadExempt
+    /** Номер текущего цикла упражнения в мезоцикле (1..N). */
+    val cycleNo: Int get() = deloadSessions / sessionsPerCycle + 1
+
+    /** Наступил разгрузочный (N-й) цикл упражнения. */
+    fun deloadDue(every: Int): Boolean = every > 0 && deloadSessions >= (every - 1) * sessionsPerCycle
+
+    /** Разгружать ли на ближайшей тренировке (плановая своя или общая принудительная). */
+    fun plannedDeload(every: Int, forced: Boolean): Boolean =
+        forced || (mode == ExerciseMode.ACTIVE && deloadDue(every) && skipPlannedDeload != true)
+
+    /** Сколько циклов до разгрузки (0 — сейчас). */
+    fun cyclesToDeload(every: Int): Int = (every - cycleNo).coerceAtLeast(0)
 
     val isSeconds: Boolean get() = metric == Metric.SECONDS
 

@@ -118,6 +118,23 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
         }
         return
     }
+    // Итоги показываем и после того, как тренировка закрыта (завершена)
+    summary?.let { text ->
+        if (!ui.loaded) {
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text("План на следующий круг") },
+                text = { Text(text) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        summary = null
+                        onExit()
+                    }) { Text("Готово") }
+                },
+            )
+            return
+        }
+    }
     if (!ui.loaded) return
 
     // Черновик ввода текущего подхода (сбрасывается при смене подхода)

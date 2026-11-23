@@ -135,9 +135,12 @@ class TimerService : Service() {
 
     private fun handleState(st: RestTimer.State, wasFinished: Boolean) {
         if (st.running) {
-            stopJob?.cancel()
-            stopJob = null
-            stopAlarm()
+            // Новый отсчёт после свистка — заглушить хвост сигнала (не каждый тик, иначе обрежутся пики)
+            if (stopJob != null) {
+                stopJob?.cancel()
+                stopJob = null
+                stopAlarm()
+            }
             holdWakeLock(st.remainingMs + 60_000)
             val sec = st.remainingSeconds
             if (prefs.countdownBeeps && sec in 1..3 && sec != lastBeepSec) {
@@ -165,8 +168,7 @@ class TimerService : Service() {
         // Ровно один свисток; системной мелодии даём прозвучать до 3 с
         val signalMs = if (p.soundEnabled && p.soundUri != null) 3_000L else 2_000L
         holdWakeLock(signalMs + 5_000)
-        if (p.soundEnabled) playAlarm(p)
-        vibrate(p)
+        SignalPlayer.signal(this) // звук (гарнитура/динамик по настройкам) + вибрация
         updateNotification(st) // то же уведомление показывает «Отдых окончен», затем исчезает
         stopJob?.cancel()
         stopJob = scope.launch {
@@ -406,6 +408,7 @@ class TimerService : Service() {
     }
 
     private fun stopAlarm() {
+        SignalPlayer.stopAll()
         try {
             ringtone?.stop()
         } catch (_: Exception) {
@@ -423,6 +426,12 @@ class TimerService : Service() {
     }
 
     private fun beep() {
+        SignalPlayer.pip(this)
+        return
+    }
+
+    @Suppress("unused")
+    private fun beepOld() {
         val sp = soundPool
         if (sp != null && pipId in loaded) {
             val v = prefs.volume.coerceIn(0.1f, 1f)

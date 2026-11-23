@@ -24,6 +24,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import kotlinx.coroutines.launch
 import ru.streetlift.tracker.data.db.SettingsEntity
 import ru.streetlift.tracker.data.repo.WorkoutRepository
 import ru.streetlift.tracker.ui.setup.SetupScreen
@@ -64,21 +65,18 @@ fun AppRoot(repo: WorkoutRepository) {
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
     val showBar = route == null || !route.startsWith("workout")
+    // Нижние вкладки листаются свайпом
+    val pager = androidx.compose.foundation.pager.rememberPagerState { tabs.size }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     Scaffold(
         bottomBar = {
             if (showBar) {
                 NavigationBar {
-                    tabs.forEach { t ->
+                    tabs.forEachIndexed { i, t ->
                         NavigationBarItem(
-                            selected = route == t.route,
-                            onClick = {
-                                nav.navigate(t.route) {
-                                    popUpTo(nav.graph.findStartDestination().id) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            },
+                            selected = pager.currentPage == i,
+                            onClick = { scope.launch { pager.animateScrollToPage(i) } },
                             icon = { Icon(t.icon, contentDescription = t.label) },
                             label = { Text(t.label) },
                         )
@@ -87,19 +85,23 @@ fun AppRoot(repo: WorkoutRepository) {
             }
         },
     ) { padding ->
-        NavHost(nav, startDestination = "home", modifier = Modifier.padding(padding)) {
-            composable("home") {
-                HomeScreen(repo, onOpenWorkout = { id -> nav.navigate("workout/$id") })
+        NavHost(nav, startDestination = "main", modifier = Modifier.padding(padding)) {
+            composable("main") {
+                androidx.compose.foundation.pager.HorizontalPager(state = pager, beyondViewportPageCount = 1) { page ->
+                    when (page) {
+                        0 -> HomeScreen(repo, onOpenWorkout = { id -> nav.navigate("workout/$id") })
+                        1 -> EditorScreen(repo)
+                        2 -> TimerScreen()
+                        else -> HistoryScreen(repo)
+                    }
+                }
             }
-            composable("editor") { EditorScreen(repo) }
-            composable("timer") { TimerScreen() }
-            composable("history") { HistoryScreen(repo) }
             composable(
                 "workout/{sessionId}",
                 arguments = listOf(navArgument("sessionId") { type = NavType.LongType }),
             ) { entry ->
                 val id = entry.arguments?.getLong("sessionId") ?: 0L
-                WorkoutScreen(repo, id, onExit = { nav.popBackStack("home", inclusive = false) })
+                WorkoutScreen(repo, id, onExit = { nav.popBackStack("main", inclusive = false) })
             }
         }
     }

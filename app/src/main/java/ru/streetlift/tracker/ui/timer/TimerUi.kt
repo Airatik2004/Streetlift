@@ -39,6 +39,8 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import kotlinx.coroutines.launch
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
@@ -278,33 +280,102 @@ fun RestTimerPanel(
     }
 }
 
-/** Вкладка «Таймер»: три режима — Отдых, Секундомер, Интервалы. */
+/** Вкладка «Таймер»: три режима (свайп или переключатель), под таймером — звук, настройки режима — по ⚙. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun TimerScreen() {
-    var mode by remember { mutableStateOf(0) }
+    val ctx = LocalContext.current
+    val pager = androidx.compose.foundation.pager.rememberPagerState { 3 }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val sw by Stopwatch.state.collectAsStateWithLifecycle()
     val iv by IntervalTimer.state.collectAsStateWithLifecycle()
+    // Одно состояние настроек на всю вкладку — окно настроек и блок звука не перезаписывают друг друга
+    var prefs by remember { mutableStateOf(TimerPrefs.load(ctx)) }
+    val update: (TimerPrefs.Prefs) -> Unit = { np ->
+        prefs = np
+        TimerPrefs.save(ctx, np)
+    }
+    var settingsFor by remember { mutableStateOf<Int?>(null) }
     // Экран не гаснет, пока идёт секундомер или интервалы
     KeepScreenOn(sw.active || iv.active)
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        ModeSwitch(listOf("Отдых", "Секундомер", "Интервалы"), mode) { mode = it }
-        when (mode) {
-            0 -> {
-                RestTimerPanel(recommendation = null, compact = false)
-                SignalSettingsCard()
+    Column(Modifier.fillMaxSize()) {
+        Box(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp)) {
+            ModeSwitch(listOf("Отдых", "Секундомер", "Интервалы"), pager.currentPage) {
+                scope.launch { pager.animateScrollToPage(it) }
             }
-            1 -> StopwatchPanel(sw)
-            else -> IntervalsPanel(iv)
+        }
+        androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.weight(1f)) { page ->
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                when (page) {
+                    0 -> RestTimerPanel(recommendation = null, compact = false)
+                    1 -> StopwatchPanel(sw)
+                    else -> IntervalsPanel(iv, prefs, update)
+                }
+                OutlinedButton(onClick = { settingsFor = page }) {
+                    Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Настройки режима")
+                }
+                SignalSettingsCard(prefs, update)
+            }
         }
     }
+    settingsFor?.let { mode -> ModeSettingsDialog(mode, prefs, update) { settingsFor = null } }
+}
+
+/** Отдельное окно с настройками режима. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ModeSettingsDialog(mode: Int, prefs: TimerPrefs.Prefs, update: (TimerPrefs.Prefs) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(listOf("Отдых", "Секундомер", "Интервалы")[mode]) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                when (mode) {
+                    0 -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Пики за 3 секунды до конца")
+                            Text(
+                                "короткий обратный отсчёт: пик-пик-пик",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = prefs.countdownBeeps, onCheckedChange = { update(prefs.copy(countdownBeeps = it)) })
+                    }
+                    1 -> {
+                        ChoiceRow("Задержка старта", listOf(0 to "Выкл", 3 to "3с", 5 to "5с"), prefs.stopwatchDelay) {
+                            update(prefs.copy(stopwatchDelay = it))
+                        }
+                        ChoiceRow("Звуковая отсечка", listOf(0 to "Выкл", 5 to "5с", 10 to "10с"), prefs.stopwatchBeepEvery) {
+                            update(prefs.copy(stopwatchBeepEvery = it))
+                        }
+                        Text(
+                            "Эти же настройки — у секундомера статики на тренировке.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    else -> {
+                        IntervalStepper("Подготовка", Fmt.clock(prefs.ivPrep)) { d -> update(prefs.copy(ivPrep = (prefs.ivPrep + d * 5).coerceIn(0, 60))) }
+                        IntervalStepper("Работа", Fmt.clock(prefs.ivWork)) { d -> update(prefs.copy(ivWork = (prefs.ivWork + d * 5).coerceIn(5, 3600))) }
+                        IntervalStepper("Отдых", Fmt.clock(prefs.ivRest)) { d -> update(prefs.copy(ivRest = (prefs.ivRest + d * 5).coerceIn(0, 3600))) }
+                        IntervalStepper("Раунды", prefs.ivRounds.toString()) { d -> update(prefs.copy(ivRounds = (prefs.ivRounds + d).coerceIn(1, 99))) }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Готово") } },
+    )
 }
 
 /** Держать экран включённым (FLAG_KEEP_SCREEN_ON) пока [on]. */
@@ -372,11 +443,6 @@ private fun ChoiceRow(label: String, options: List<Pair<Int, String>>, value: In
 @Composable
 private fun StopwatchPanel(sw: Stopwatch.State) {
     val ctx = LocalContext.current
-    var prefs by remember { mutableStateOf(TimerPrefs.load(ctx)) }
-    fun update(p: TimerPrefs.Prefs) {
-        prefs = p
-        TimerPrefs.save(ctx, p)
-    }
     Text(
         if (sw.countdown > 0) "${sw.countdown}" else formatStopwatch(sw.elapsedMs),
         style = TimerDigits.copy(fontSize = 64.sp),
@@ -413,31 +479,11 @@ private fun StopwatchPanel(sw: Stopwatch.State) {
             }
         }
     }
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            ChoiceRow("Задержка старта", listOf(0 to "Выкл", 3 to "3с", 5 to "5с"), prefs.stopwatchDelay) {
-                update(prefs.copy(stopwatchDelay = it))
-            }
-            ChoiceRow("Звуковая отсечка", listOf(0 to "Выкл", 5 to "каждые 5с", 10 to "каждые 10с"), prefs.stopwatchBeepEvery) {
-                update(prefs.copy(stopwatchBeepEvery = it))
-            }
-            Text(
-                "Эти же настройки — у секундомера статики на тренировке.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
 }
 
 @Composable
-private fun IntervalsPanel(iv: IntervalTimer.State) {
+private fun IntervalsPanel(iv: IntervalTimer.State, prefs: TimerPrefs.Prefs, update: (TimerPrefs.Prefs) -> Unit) {
     val ctx = LocalContext.current
-    var prefs by remember { mutableStateOf(TimerPrefs.load(ctx)) }
-    fun update(p: TimerPrefs.Prefs) {
-        prefs = p
-        TimerPrefs.save(ctx, p)
-    }
     val cfg = IntervalTimer.Config(prefs.ivPrep, prefs.ivWork, prefs.ivRest, prefs.ivRounds)
 
     TimerRing(if (iv.active) iv.progress else 1f, 240.dp, 12.dp, iv.phase == IntervalTimer.Phase.DONE) {
@@ -469,14 +515,6 @@ private fun IntervalsPanel(iv: IntervalTimer.State) {
         }
     }
     IntervalPrograms(cfg) { p -> update(prefs.copy(ivPrep = p.prep, ivWork = p.work, ivRest = p.rest, ivRounds = p.rounds)) }
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            IntervalStepper("Подготовка", Fmt.clock(prefs.ivPrep)) { d -> update(prefs.copy(ivPrep = (prefs.ivPrep + d * 5).coerceIn(0, 60))) }
-            IntervalStepper("Работа", Fmt.clock(prefs.ivWork)) { d -> update(prefs.copy(ivWork = (prefs.ivWork + d * 5).coerceIn(5, 3600))) }
-            IntervalStepper("Отдых", Fmt.clock(prefs.ivRest)) { d -> update(prefs.copy(ivRest = (prefs.ivRest + d * 5).coerceIn(0, 3600))) }
-            IntervalStepper("Раунды", prefs.ivRounds.toString()) { d -> update(prefs.copy(ivRounds = (prefs.ivRounds + d).coerceIn(1, 99))) }
-        }
-    }
 }
 
 @Composable
@@ -498,13 +536,8 @@ private fun soundTitle(context: Context, uri: String?): String {
 /** Настройки сигнала окончания отдыха: мелодия, длительность, громкость, вибрация, пики. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SignalSettingsCard() {
+fun SignalSettingsCard(p: TimerPrefs.Prefs, update: (TimerPrefs.Prefs) -> Unit) {
     val ctx = LocalContext.current
-    var p by remember { mutableStateOf(TimerPrefs.load(ctx)) }
-    fun update(np: TimerPrefs.Prefs) {
-        p = np
-        TimerPrefs.save(ctx, np)
-    }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         if (res.resultCode == Activity.RESULT_OK) {
             val picked = res.data?.let {
@@ -517,13 +550,28 @@ fun SignalSettingsCard() {
 
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Сигнал окончания отдыха", style = MaterialTheme.typography.titleMedium)
+            Text("Звук и вибрация", style = MaterialTheme.typography.titleMedium)
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Звук", Modifier.weight(1f))
-                Switch(checked = p.soundEnabled, onCheckedChange = { update(p.copy(soundEnabled = it)) })
+                Column(Modifier.weight(1f)) {
+                    Text("Bluetooth-гарнитура")
+                    Text(
+                        "если подключена (Buds и т.п.)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = p.outBt, onCheckedChange = { update(p.copy(outBt = it, soundEnabled = it || p.outSpeaker)) })
             }
-            if (p.soundEnabled) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Динамик телефона", Modifier.weight(1f))
+                Switch(checked = p.outSpeaker, onCheckedChange = { update(p.copy(outSpeaker = it, soundEnabled = it || p.outBt)) })
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Вибрация", Modifier.weight(1f))
+                Switch(checked = p.vibration, onCheckedChange = { update(p.copy(vibration = it)) })
+            }
+            if (p.outBt || p.outSpeaker) {
                 OutlinedButton(
                     onClick = {
                         val current = p.soundUri?.let { Uri.parse(it) }
@@ -537,7 +585,7 @@ fun SignalSettingsCard() {
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Мелодия: $title", maxLines = 1)
+                    Text("Сигнал: $title", maxLines = 1)
                 }
                 if (p.soundUri != null) {
                     TextButton(onClick = { update(p.copy(soundUri = null)) }) { Text("Вернуть встроенный свисток") }
@@ -545,34 +593,16 @@ fun SignalSettingsCard() {
                 Text("Громкость: ${(p.volume * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
                 Slider(
                     value = p.volume,
-                    onValueChange = { p = p.copy(volume = it) },
-                    onValueChangeFinished = { TimerPrefs.save(ctx, p) },
+                    onValueChange = { update(p.copy(volume = it)) },
                     valueRange = 0.1f..1f,
                 )
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Вибрация вместе со свистком", Modifier.weight(1f))
-                Switch(checked = p.vibration, onCheckedChange = { update(p.copy(vibration = it)) })
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Пики за 3 секунды до конца")
-                    Text(
-                        "короткий обратный отсчёт: пик-пик-пик",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(checked = p.countdownBeeps, onCheckedChange = { update(p.copy(countdownBeeps = it)) })
-            }
-
-            Button(onClick = { TimerActions.start(ctx, 4_000, "Проверка сигнала") }, modifier = Modifier.fillMaxWidth()) {
-                Text("Проверить (таймер на 4 с)")
+            Button(onClick = { ru.streetlift.tracker.timer.SignalPlayer.signal(ctx) }, modifier = Modifier.fillMaxWidth()) {
+                Text("Проверить сигнал")
             }
             Text(
-                "Звук идёт через громкость будильника, поэтому слышен и в беззвучном режиме.",
+                "Звук идёт через громкость мультимедиа. Если включена только гарнитура, а она не подключена — будет только вибрация.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

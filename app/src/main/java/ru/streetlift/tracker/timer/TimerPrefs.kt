@@ -18,6 +18,9 @@ object TimerPrefs {
         /** Громкость 0.1..1.0 (Android 9+). */
         val volume: Float = 1f,
         val vibration: Boolean = true,
+        /** Куда выводить звук: Bluetooth-гарнитура и/или динамик телефона (независимо). */
+        val outBt: Boolean = true,
+        val outSpeaker: Boolean = true,
         /** Короткие пики за 3, 2, 1 секунду до конца. */
         val countdownBeeps: Boolean = true,
         /** Секундомер (статика): задержка старта 0/3/5 с и пик каждые 0/5/10 с. */
@@ -64,6 +67,8 @@ object TimerPrefs {
             soundUri = p.getString("soundUri", null),
             volume = p.getFloat("volume", 1f),
             vibration = p.getBoolean("vibrationOn", true),
+            outBt = p.getBoolean("outBt", true),
+            outSpeaker = p.getBoolean("outSpeaker", true),
             countdownBeeps = p.getBoolean("countdownBeeps", true),
             stopwatchDelay = p.getInt("swDelay", 3),
             stopwatchBeepEvery = p.getInt("swBeep", 5),
@@ -80,6 +85,8 @@ object TimerPrefs {
             .putString("soundUri", prefs.soundUri)
             .putFloat("volume", prefs.volume)
             .putBoolean("vibrationOn", prefs.vibration)
+            .putBoolean("outBt", prefs.outBt)
+            .putBoolean("outSpeaker", prefs.outSpeaker)
             .putBoolean("countdownBeeps", prefs.countdownBeeps)
             .putInt("swDelay", prefs.stopwatchDelay)
             .putInt("swBeep", prefs.stopwatchBeepEvery)

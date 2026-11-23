@@ -17,13 +17,36 @@ data class ExerciseBlock(
     /** Коридор для −/+. */
     val minCount: Int,
     val maxCount: Int,
+    /** Одностороннее: с какой стороны начинать подходы этой тренировки («L»/«R»). */
+    val firstSide: String? = null,
 ) {
-    val doneCount: Int get() = logs.size
+    val unilateral: Boolean get() = firstSide != null
+
+    /** Сделано подходов (у односторонних — обе стороны). */
+    val doneCount: Int get() = if (unilateral) logs.size / 2 else logs.size
+
+    /** Какая сторона сейчас («L»/«R»), null — обычное упражнение. */
+    val pendingSide: String?
+        get() = firstSide?.let { f -> if (logs.size % 2 == 0) f else otherSide(f) }
+
+    /** Подход [n]: первая и вторая сторона. */
+    fun setLogs(n: Int): Pair<SetLogEntity?, SetLogEntity?> =
+        if (!unilateral) logs.getOrNull(n - 1) to null
+        else logs.getOrNull((n - 1) * 2) to logs.getOrNull((n - 1) * 2 + 1)
+}
+
+fun otherSide(s: String) = if (s == "L") "R" else "L"
+
+/** «левая» / «правая». */
+fun sideName(s: String?) = when (s) {
+    "L" -> "левая"
+    "R" -> "правая"
+    else -> ""
 }
 
 /** Строка списка шагов: подход (сделанный или будущий) или отдых между подходами. */
 sealed interface StepRow {
-    data class Work(val block: ExerciseBlock, val setNumber: Int, val log: SetLogEntity?) : StepRow
+    data class Work(val block: ExerciseBlock, val setNumber: Int, val log: SetLogEntity?, val log2: SetLogEntity? = null) : StepRow
     data class Rest(val seconds: Int) : StepRow
 }
 
@@ -45,13 +68,17 @@ data class PlanResult(
     val defaults: Draft,
     val canUndo: Boolean,
     val resting: Boolean,
+    /** Текущая сторона у одностороннего упражнения («L»/«R»). */
+    val side: String? = null,
 ) {
     fun recommend(b: ExerciseBlock): RestRecommendation =
         RestRecommender.recommend(b.exercise.type, alternating, b.plan.isDeload)
 
     /** «Отжимания в горизонте · подход 3 из 4». */
     val exerciseLine: String
-        get() = current?.let { "${it.exercise.name} · подход $setNumber из ${it.plannedCount}" } ?: "Все подходы сделаны"
+        get() = current?.let {
+            "${it.exercise.name} · подход $setNumber из ${it.plannedCount}" + (side?.let { s -> " · ${sideName(s)}" } ?: "")
+        } ?: "Все подходы сделаны"
 }
 
 /** Порядок подходов, текущий шаг и список шагов — общая логика экрана и уведомления. */
@@ -65,13 +92,16 @@ object WorkoutPlanner {
         extra: Map<Long, Int>,
         prefill: Map<String, Draft>,
         resting: Boolean,
+        firstSides: Map<Long, String> = emptyMap(),
     ): PlanResult {
         val blocks = exercises.map { ex ->
             val plan = plans.getValue(ex.id)
             val exLogs = logs.filter { it.exerciseId == ex.id }.sortedBy { it.loggedAt }
             val floor = if (plan.isDeload || plan.isCalibration) 1 else max(1, ex.minSets - 1)
-            val minCount = max(floor, exLogs.size)
-            val maxCount = max(max(ex.maxSets, plan.sets), exLogs.size)
+            val first = firstSides[ex.id]
+            val started = if (first != null) (exLogs.size + 1) / 2 else exLogs.size
+            val minCount = max(floor, started)
+            val maxCount = max(max(ex.maxSets, plan.sets), started)
             ExerciseBlock(
                 exercise = ex,
                 plan = plan,
@@ -79,6 +109,7 @@ object WorkoutPlanner {
                 plannedCount = (plan.sets + (extra[ex.id] ?: 0)).coerceIn(minCount, maxCount),
                 minCount = minCount,
                 maxCount = maxCount,
+                firstSide = first,
             )
         }
         // Статика и задняя дельта — всегда в конце дня, вне суперсета
@@ -90,7 +121,7 @@ object WorkoutPlanner {
         val nextPending = order.firstOrNull { (id, n) -> n > (byId[id]?.doneCount ?: 0) }
         val current = nextPending?.let { byId[it.first] }
         val setNumber = (current?.doneCount ?: 0) + 1
-        val stepKey = "${current?.exercise?.id}_${current?.doneCount}"
+        val stepKey = "${current?.exercise?.id}_${current?.logs?.size}"
         val isResting = resting && current != null
 
         val rows = mutableListOf<StepRow>()
@@ -104,7 +135,8 @@ object WorkoutPlanner {
             if (current != null && id == current.exercise.id && n == setNumber) {
                 currentRow = if (isResting && rows.lastOrNull() is StepRow.Rest) rows.size - 1 else rows.size
             }
-            rows += StepRow.Work(b, n, b.logs.getOrNull(n - 1))
+            val (l1, l2) = b.setLogs(n)
+            rows += StepRow.Work(b, n, l1, l2)
         }
         if (current == null) currentRow = (rows.size - 1).coerceAtLeast(0)
 
@@ -130,6 +162,7 @@ object WorkoutPlanner {
             defaults = defaults,
             canUndo = logs.isNotEmpty(),
             resting = isResting,
+            side = current?.pendingSide,
         )
     }
 

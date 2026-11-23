@@ -261,7 +261,8 @@ fun HistoryScreen(repo: WorkoutRepository, focusSessionId: Long? = null, onFocus
                                     modifier = Modifier.combinedClickable(onClick = {}, onLongClick = { editSet = log }),
                                 ) {
                                     Text(
-                                        "${Fmt.weightValue(log.weightKg)}×${log.reps}${if (log.isSeconds) "с" else ""} · ${Fmt.rirValue(log.rir)}",
+                                        (when (log.side) { "L" -> "Л "; "R" -> "П "; else -> "" }) +
+                                            "${Fmt.weightValue(log.weightKg)}×${log.reps}${if (log.isSeconds) "с" else ""} · ${Fmt.rirValue(log.rir)}",
                                         style = MaterialTheme.typography.bodySmall,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                     )

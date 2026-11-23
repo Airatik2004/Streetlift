@@ -174,6 +174,16 @@ class WorkoutRepository(private val db: AppDatabase) {
 
     suspend fun hasActiveSession(): Boolean = sessionDao.getActive() != null
 
+    /** Слабая сторона по прошлой тренировке упражнения: меньше повторов в сумме; поровну или нет данных — левая. */
+    suspend fun weakSide(exerciseName: String, excludeSession: Long): String {
+        val sided = sessionDao.getAllSets().filter { it.exerciseName == exerciseName && it.side != null && it.sessionId != excludeSession }
+        val last = sided.maxOfOrNull { it.sessionId } ?: return "L"
+        val s = sided.filter { it.sessionId == last }
+        val l = s.filter { it.side == "L" }.sumOf { it.reps }
+        val r = s.filter { it.side == "R" }.sumOf { it.reps }
+        return if (r < l) "R" else "L"
+    }
+
     // ---------------- Подводка к старту ----------------
 
     suspend fun setPeak(epochDay: Long, exerciseIds: Set<Long>, bodyWeightKg: Float?) {
@@ -289,7 +299,12 @@ class WorkoutRepository(private val db: AppDatabase) {
             val result = ProgressionEngine.computeNext(
                 ex.toConfig(),
                 ex.toState(),
-                exLogs.map { SetResult(it.weightKg, it.reps, it.rir) },
+                // Односторонние: подход засчитывается по слабой стороне (меньше повторов, тяжелее RIR)
+                if (ex.unilateral) {
+                    exLogs.groupBy { it.setIndex }.toSortedMap().values.map { pair ->
+                        SetResult(pair.first().weightKg, pair.minOf { it.reps }, pair.minOf { it.rir })
+                    }
+                } else exLogs.map { SetResult(it.weightKg, it.reps, it.rir) },
                 wasDeload,
                 stageCeilingEligible = ex.stageCeilingEligible,
             )
@@ -703,7 +718,11 @@ fun recordEntries(
     val zone = java.time.ZoneId.systemDefault()
     return sets.filter { it.reps > 0 }.map {
         ru.streetlift.tracker.domain.Records.Entry(
-            name = it.exerciseName,
+            name = it.exerciseName + when (it.side) {
+                "L" -> " · левая"
+                "R" -> " · правая"
+                else -> ""
+            },
             stage = it.leverageStage,
             weight = it.weightKg,
             value = it.reps,

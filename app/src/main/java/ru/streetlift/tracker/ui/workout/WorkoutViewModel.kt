@@ -23,6 +23,8 @@ data class WorkoutUi(
     val blocks: List<ExerciseBlock> = emptyList(),
     val current: ExerciseBlock? = null,
     val currentSetNumber: Int = 0,
+    /** «левая» / «правая» у односторонних, иначе пусто. */
+    val currentSide: String = "",
     val defaultWeight: Float = 0f,
     val defaultReps: Int = 0,
     val defaultRir: Int = 2,
@@ -61,6 +63,7 @@ class WorkoutViewModel(
                 blocks = r.blocks,
                 current = cur,
                 currentSetNumber = r.setNumber,
+                currentSide = ru.streetlift.tracker.workout.sideName(r.side),
                 defaultWeight = r.defaults.weight,
                 defaultReps = r.defaults.reps,
                 defaultRir = r.defaults.rir,

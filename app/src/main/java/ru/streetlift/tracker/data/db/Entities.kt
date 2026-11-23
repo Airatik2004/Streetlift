@@ -139,6 +139,9 @@ data class ExerciseEntity(
     /** Рабочих тренировок упражнения в текущем мезоцикле (калибровка не считается). */
     val deloadSessions: Int = 0,
 ) {
+    /** Одностороннее: подход — сначала одна сторона, потом другая (пистолетики, подтягивания на 1 руке). */
+    val unilateral: Boolean get() = name == "Пистолетики" || name == "Подтягивания на 1 руке"
+
     /** Тренировок в цикле упражнения: задняя дельта — 2 (дни 1 и 3), остальные — 1. */
     val sessionsPerCycle: Int get() = if (shareKey != null) 2 else 1
 
@@ -257,6 +260,8 @@ data class SetLogEntity(
     val isCalibration: Boolean = false,
     /** Статика: в reps — секунды удержания. */
     val isSeconds: Boolean = false,
+    /** Сторона у односторонних упражнений: «L» — левая, «R» — правая; null — обе. */
+    val side: String? = null,
 )
 
 /** Справочник стадий рычага: 7 встроенных + свои варианты пользователя. */

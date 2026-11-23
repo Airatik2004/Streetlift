@@ -247,10 +247,19 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                                 modifier = Modifier.weight(1f),
                             )
                             if (log != null) {
+                                // Односторонние: «Л 8 / П 7»; отстающая сторона (разница ≥ 2) — оранжевым
+                                val l2 = row.log2
+                                val sided = log.side != null
+                                val gap = l2 != null && kotlin.math.abs(log.reps - l2.reps) >= 2
                                 Text(
-                                    "${Fmt.weightValue(log.weightKg)} × ${log.reps}${if (log.isSeconds) " с" else ""} · ${Fmt.rirValue(log.rir)}",
+                                    if (sided) {
+                                        "${Fmt.weightValue(log.weightKg)} × ${sideLetter(log.side)} ${log.reps}" +
+                                            (l2?.let { " / ${sideLetter(it.side)} ${it.reps}" } ?: "") + " · ${Fmt.rirValue(minOf(log.rir, l2?.rir ?: log.rir))}"
+                                    } else {
+                                        "${Fmt.weightValue(log.weightKg)} × ${log.reps}${if (log.isSeconds) " с" else ""} · ${Fmt.rirValue(log.rir)}"
+                                    },
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = DeloadGreen,
+                                    color = if (gap) ru.streetlift.tracker.ui.theme.WarnOrange else DeloadGreen,
                                 )
                             }
                         }
@@ -367,7 +376,8 @@ private fun RestPanel(timer: RestTimer.State, ui: WorkoutUi) {
     }
     Spacer(Modifier.height(10.dp))
     Text(
-        "Дальше: ${cur.exercise.name} · подход ${ui.currentSetNumber} из ${cur.plannedCount}",
+        "Дальше: ${cur.exercise.name} · подход ${ui.currentSetNumber} из ${cur.plannedCount}" +
+            (if (ui.currentSide.isNotEmpty()) " · ${ui.currentSide}" else ""),
         style = MaterialTheme.typography.bodyLarge,
         textAlign = TextAlign.Center,
     )
@@ -431,7 +441,11 @@ private fun WorkPanel(
     // Подход N из M с −/+ в пределах коридора
     Row(verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = { onSets(-1) }, enabled = cur.plannedCount > cur.minCount) { Text("−", fontSize = 20.sp) }
-        Text("Подход ${ui.currentSetNumber} из ${cur.plannedCount}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+        Text(
+            "Подход ${ui.currentSetNumber} из ${cur.plannedCount}" + (if (ui.currentSide.isNotEmpty()) " · ${ui.currentSide}" else ""),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
         TextButton(onClick = { onSets(1) }, enabled = cur.plannedCount < cur.maxCount) { Text("+", fontSize = 20.sp) }
     }
     Text(
@@ -531,4 +545,11 @@ private fun HoldStopwatch(onResult: (Int) -> Unit) {
             }
         }
     }
+}
+
+/** «Л» / «П». */
+private fun sideLetter(s: String?) = when (s) {
+    "L" -> "Л"
+    "R" -> "П"
+    else -> ""
 }

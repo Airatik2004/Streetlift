@@ -229,7 +229,10 @@ class TimerService : Service() {
         val progress: Int
         if (workStep && r != null) {
             title = r.current?.exercise?.name ?: "Все подходы сделаны"
-            text = r.current?.let { "Подход ${r.setNumber} из ${it.plannedCount} · ${planLine(r)}" } ?: planLine(r)
+            text = r.current?.let {
+                "Подход ${r.setNumber} из ${it.plannedCount}" +
+                    (r.side?.let { s -> " · ${ru.streetlift.tracker.workout.sideName(s)}" } ?: "") + " · ${planLine(r)}"
+            } ?: planLine(r)
             sub = "подходов ${r.doneSets}/${r.plannedSets}"
             progress = if (r.plannedSets > 0) r.doneSets * 1000 / r.plannedSets else 0
         } else {

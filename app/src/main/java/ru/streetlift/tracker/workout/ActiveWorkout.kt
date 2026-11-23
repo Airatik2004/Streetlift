@@ -51,6 +51,9 @@ object ActiveWorkout {
 
     fun owner(id: Long) = "session_$id"
 
+    /** Пауза на смену стороны у односторонних упражнений. */
+    const val SIDE_SWITCH_MS = 30_000L
+
     private fun repo(ctx: Context): WorkoutRepository = (ctx.applicationContext as StreetLiftApp).repository
 
     /** Начать/продолжить отслеживание тренировки. */
@@ -89,11 +92,13 @@ object ActiveWorkout {
                     ?.let { e.id to it }
             }.toMap()
             val exercises = all.filter { it.id in plans }
+            // Односторонние: на всю тренировку начинаем со слабой стороны прошлой тренировки (поровну — с левой)
+            val firstSides = exercises.filter { it.unilateral }.associate { it.id to repo.weakSide(it.name, sessionId) }
             val own = owner(sessionId)
             TimerService.ensureRunning(app)
             combine(repo.observeSets(sessionId), extra, prefill, RestTimer.state) { logs, ex, pf, timer ->
                 val resting = timer.owner == own && !timer.finished && !timer.idle
-                WorkoutPlanner.compute(session, exercises, plans, logs, ex, pf, resting)
+                WorkoutPlanner.compute(session, exercises, plans, logs, ex, pf, resting, firstSides)
             }.collect { _result.value = it }
         }
     }
@@ -137,7 +142,7 @@ object ActiveWorkout {
                     sessionId = r.session.id,
                     exerciseId = cur.exercise.id,
                     exerciseName = cur.exercise.name,
-                    setIndex = cur.logs.size + 1,
+                    setIndex = if (cur.unilateral) cur.doneCount + 1 else cur.logs.size + 1,
                     weightKg = ProgressionEngine.roundWeight(d.weight),
                     reps = d.reps.coerceAtLeast(0),
                     rir = d.rir.coerceIn(0, 5),
@@ -146,12 +151,17 @@ object ActiveWorkout {
                     leverageStage = d.stage,
                     isCalibration = cur.plan.isCalibration,
                     isSeconds = cur.exercise.isSeconds,
+                    side = r.side,
                 ),
             )
             prefill.update { it - r.stepKey }
             draft = null
-            if (r.doneSets + 1 < r.plannedSets) {
-                TimerActions.start(app, r.recommend(cur).seconds * 1000L, owner = owner(r.session.id))
+            val firstOfPair = cur.unilateral && cur.logs.size % 2 == 0
+            when {
+                // Первая сторона сделана — 30 с на смену стороны
+                firstOfPair -> TimerActions.start(app, SIDE_SWITCH_MS, owner = owner(r.session.id))
+                r.doneSets + 1 < r.plannedSets ->
+                    TimerActions.start(app, r.recommend(cur).seconds * 1000L, owner = owner(r.session.id))
             }
         }
     }

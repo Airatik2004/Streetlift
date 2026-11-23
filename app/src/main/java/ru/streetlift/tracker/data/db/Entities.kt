@@ -106,6 +106,8 @@ data class ExerciseEntity(
     val metric: Metric = Metric.REPS,
     /** Всегда в конце дня, вне суперсета (задняя дельта). */
     val alwaysLast: Boolean = false,
+    /** Одно упражнение в нескольких днях с общим прогрессом (задняя дельта: дни 1 и 3). */
+    val shareKey: String? = null,
 ) {
     val isSeconds: Boolean get() = metric == Metric.SECONDS
 

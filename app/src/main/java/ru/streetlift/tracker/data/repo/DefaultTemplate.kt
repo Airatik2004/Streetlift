@@ -26,6 +26,7 @@ object DefaultTemplate {
         val group: String? = null,
         val metric: Metric = Metric.REPS,
         val alwaysLast: Boolean = false,
+        val shareKey: String? = null,
     )
 
     private data class Day(val name: String, val alternating: Boolean, val exercises: List<Ex>)
@@ -40,7 +41,7 @@ object DefaultTemplate {
             listOf(
                 Ex("Выходы силой", EXPLOSIVE, 5..6, 6..10, 1..2, 2.5f),
                 Ex("Пистолетики", ACCESSORY, 3..4, 8..12, 2..2, 2.5f),
-                Ex("Обратные разведения на заднюю дельту", ACCESSORY, 3..3, 15..20, 2..2, 1.25f, alwaysLast = true),
+                Ex("Обратные разведения на заднюю дельту", ACCESSORY, 3..3, 15..20, 2..2, 1.25f, alwaysLast = true, shareKey = "rear_delt"),
             ),
         ),
         Day(
@@ -56,7 +57,7 @@ object DefaultTemplate {
             listOf(
                 Ex("Отжимания на брусьях", HYPERTROPHY_PUMP, 4..4, 15..20, 2..2, 2.5f),
                 Ex("Подтягивания", HYPERTROPHY_PUMP, 4..4, 15..20, 2..2, 2.5f),
-                Ex("Обратные разведения на заднюю дельту", ACCESSORY, 3..3, 15..20, 2..2, 1.25f, alwaysLast = true),
+                Ex("Обратные разведения на заднюю дельту", ACCESSORY, 3..3, 15..20, 2..2, 1.25f, alwaysLast = true, shareKey = "rear_delt"),
             ),
         ),
         Day(
@@ -102,6 +103,7 @@ object DefaultTemplate {
                         stageGroup = e.group,
                         metric = e.metric,
                         alwaysLast = e.alwaysLast,
+                        shareKey = e.shareKey,
                     ),
                 )
             }

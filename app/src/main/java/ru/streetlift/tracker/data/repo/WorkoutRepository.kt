@@ -65,6 +65,18 @@ class WorkoutRepository(private val db: AppDatabase) {
         }
     }
 
+    /** Общий прогресс: состояние упражнения копируется во все его копии с тем же shareKey. */
+    private suspend fun syncShared(changed: List<ExerciseEntity>) {
+        val keyed = changed.filter { it.shareKey != null }
+        if (keyed.isEmpty()) return
+        val all = programDao.getAllExercises()
+        val copies = keyed.flatMap { src ->
+            all.filter { it.shareKey == src.shareKey && it.id != src.id }
+                .map { it.withState(src.toState()).copy(leverageStage = src.leverageStage) }
+        }
+        if (copies.isNotEmpty()) programDao.updateExercises(copies)
+    }
+
     // ---------------- Тренировка ----------------
 
     suspend fun startSession(dayId: Long): Long = db.withTransaction {
@@ -117,7 +129,10 @@ class WorkoutRepository(private val db: AppDatabase) {
         val recalibrate = programDao.getAllExercises().filter { it.id in ids }.map {
             it.withState(ProgressionEngine.onStageChanged(it.toState()))
         }
-        if (recalibrate.isNotEmpty()) programDao.updateExercises(recalibrate)
+        if (recalibrate.isNotEmpty()) {
+            programDao.updateExercises(recalibrate)
+            syncShared(recalibrate)
+        }
         settingsDao.upsert(
             s.copy(peakEpochDay = null, peakExerciseIds = "", cycleInMeso = 1, deloadOverride = DeloadOverride.AUTO, mesoIndex = s.mesoIndex + 1),
         )
@@ -160,7 +175,10 @@ class WorkoutRepository(private val db: AppDatabase) {
             val restored = snap.exercises.mapNotNull { old ->
                 now[old.id]?.withState(old.toState())?.copy(leverageStage = old.leverageStage)
             }
-            if (restored.isNotEmpty()) programDao.updateExercises(restored)
+            if (restored.isNotEmpty()) {
+                programDao.updateExercises(restored)
+                syncShared(restored)
+            }
             rolledBack = true
         }
         sessionDao.deleteSession(sessionId)
@@ -202,7 +220,10 @@ class WorkoutRepository(private val db: AppDatabase) {
                 next.copy(leverageStage = exLogs.last().leverageStage ?: ex.leverageStage)
             } else next
         }
-        if (updated.isNotEmpty()) programDao.updateExercises(updated)
+        if (updated.isNotEmpty()) {
+            programDao.updateExercises(updated)
+            syncShared(updated)
+        }
 
         val dayIndex = days.indexOfFirst { it.id == session.dayId }.takeIf { it >= 0 } ?: s.currentDayIndex
         val adv = ProgressionEngine.advanceCycle(
@@ -372,6 +393,7 @@ class WorkoutRepository(private val db: AppDatabase) {
             final = changeStage(old, final, fixed.leverageStage)
         }
         programDao.updateExercise(final)
+        syncShared(listOf(final))
     }
 
     /** Смена стадии: старая уходит в архив, упражнение — на 1 круг в калибровку. */
@@ -417,7 +439,10 @@ class WorkoutRepository(private val db: AppDatabase) {
                 lastScoreWeight = null,
             )
         }
-        if (updated.isNotEmpty()) programDao.updateExercises(updated)
+        if (updated.isNotEmpty()) {
+            programDao.updateExercises(updated)
+            syncShared(updated)
+        }
         settingsDao.upsert(getSettings().copy(setupDone = true))
     }
 

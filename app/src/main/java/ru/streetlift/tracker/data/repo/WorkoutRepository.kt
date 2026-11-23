@@ -15,6 +15,7 @@ import ru.streetlift.tracker.data.db.SettingsEntity
 import ru.streetlift.tracker.data.db.StageArchiveEntity
 import ru.streetlift.tracker.data.db.StageEntity
 import ru.streetlift.tracker.domain.CycleState
+import ru.streetlift.tracker.domain.Fmt
 import ru.streetlift.tracker.domain.DeloadOverride
 import ru.streetlift.tracker.domain.ExerciseMode
 import ru.streetlift.tracker.domain.PeakPhase
@@ -32,6 +33,18 @@ class WorkoutRepository(private val db: AppDatabase) {
     private val settingsDao = db.settingsDao()
     private val programDao = db.programDao()
     private val sessionDao = db.sessionDao()
+    private val statsDao = db.statsDao()
+
+    // ---------------- Статистика ----------------
+
+    val manualRecords: Flow<List<ru.streetlift.tracker.data.db.ManualRecordEntity>> = statsDao.observeManual()
+    val runs: Flow<List<ru.streetlift.tracker.data.db.RunEntity>> = statsDao.observeRuns()
+    val allSets: Flow<List<SetLogEntity>> = sessionDao.observeAllSets()
+
+    suspend fun addManualRecord(r: ru.streetlift.tracker.data.db.ManualRecordEntity) { statsDao.insertManual(r) }
+    suspend fun deleteManualRecord(id: Long) = statsDao.deleteManual(id)
+    suspend fun saveRun(r: ru.streetlift.tracker.data.db.RunEntity) { statsDao.insertRun(r) }
+    suspend fun deleteRun(id: Long) = statsDao.deleteRun(id)
 
     val settings: Flow<SettingsEntity> = settingsDao.observe().map { (it ?: SettingsEntity()).also(::applyBands) }
     val days: Flow<List<DayEntity>> = programDao.observeDays()
@@ -321,6 +334,14 @@ class WorkoutRepository(private val db: AppDatabase) {
                 manualDay = false,
             ),
         )
+        // Новые рекорды при весе (лучший подход выше прежнего)
+        runCatching {
+            val finishedIds = sessionDao.getAllSessions().filter { it.finishedAt != null || it.id == sessionId }.map { it.id }.toSet()
+            val entries = recordEntries(sessionDao.getAllSets().filter { it.sessionId in finishedIds }, statsDao.getManual())
+            ru.streetlift.tracker.domain.Records.newRecords(entries, sessionId).forEach { r ->
+                lines += "🏆 Рекорд: ${r.name}${r.stage?.let { " ($it)" } ?: ""} — ${Fmt.weight(r.weight)} × ${r.value}${if (r.isSeconds) " с" else ""}"
+            }
+        }
         val summary = lines.joinToString("\n")
         sessionDao.updateSession(session.copy(finishedAt = System.currentTimeMillis(), summary = summary, rollback = rollback))
         summary
@@ -573,6 +594,8 @@ class WorkoutRepository(private val db: AppDatabase) {
                 sets = sessionDao.getAllSets(),
                 stages = programDao.getStages(),
                 stageArchive = programDao.getArchive(),
+                manualRecords = statsDao.getManual(),
+                runs = statsDao.getRuns(),
             )
         }
         return BackupJson.encode(data)
@@ -619,6 +642,10 @@ class WorkoutRepository(private val db: AppDatabase) {
                 },
             )
             programDao.insertArchives(data.stageArchive)
+            statsDao.clearManual()
+            statsDao.insertManuals(data.manualRecords.map { it.copy(id = 0, exerciseName = DefaultTemplate.renamed[it.exerciseName] ?: it.exerciseName) })
+            statsDao.clearRuns()
+            statsDao.insertRuns(data.runs.map { it.copy(id = 0) })
             val days = programDao.getDays()
             settingsDao.upsert(
                 data.settings.copy(
@@ -661,4 +688,34 @@ fun plannedDayIndex(
     val pos = days[base].position
     val picked = Peaking.pickPeakDay(sorted.indexOfFirst { it.position == pos }.coerceAtLeast(0), perDay, s.peakIds, done)
     return days.indexOfFirst { it.id == sorted[picked].id }.coerceAtLeast(0)
+}
+
+
+/** Подходы тренировок и ручные рекорды — в общий список для рекордов и графиков. */
+fun recordEntries(
+    sets: List<SetLogEntity>,
+    manual: List<ru.streetlift.tracker.data.db.ManualRecordEntity>,
+): List<ru.streetlift.tracker.domain.Records.Entry> {
+    val zone = java.time.ZoneId.systemDefault()
+    return sets.filter { it.reps > 0 }.map {
+        ru.streetlift.tracker.domain.Records.Entry(
+            name = it.exerciseName,
+            stage = it.leverageStage,
+            weight = it.weightKg,
+            value = it.reps,
+            isSeconds = it.isSeconds,
+            epochDay = java.time.Instant.ofEpochMilli(it.loggedAt).atZone(zone).toLocalDate().toEpochDay(),
+            sessionId = it.sessionId,
+        )
+    } + manual.map {
+        ru.streetlift.tracker.domain.Records.Entry(
+            name = it.exerciseName,
+            stage = it.leverageStage,
+            weight = it.weightKg,
+            value = it.value,
+            isSeconds = it.isSeconds,
+            epochDay = it.epochDay,
+            manualId = it.id,
+        )
+    }
 }

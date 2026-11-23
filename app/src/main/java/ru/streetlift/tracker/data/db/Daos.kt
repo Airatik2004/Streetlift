@@ -171,3 +171,42 @@ interface SessionDao {
     @Query("DELETE FROM set_logs")
     suspend fun clearSets()
 }
+
+@Dao
+interface StatsDao {
+    @Query("SELECT * FROM manual_records ORDER BY epochDay")
+    fun observeManual(): Flow<List<ManualRecordEntity>>
+
+    @Query("SELECT * FROM manual_records")
+    suspend fun getManual(): List<ManualRecordEntity>
+
+    @Insert
+    suspend fun insertManual(r: ManualRecordEntity): Long
+
+    @Insert
+    suspend fun insertManuals(r: List<ManualRecordEntity>)
+
+    @Query("DELETE FROM manual_records WHERE id = :id")
+    suspend fun deleteManual(id: Long)
+
+    @Query("DELETE FROM manual_records")
+    suspend fun clearManual()
+
+    @Query("SELECT * FROM runs ORDER BY startedAt DESC")
+    fun observeRuns(): Flow<List<RunEntity>>
+
+    @Query("SELECT * FROM runs")
+    suspend fun getRuns(): List<RunEntity>
+
+    @Insert
+    suspend fun insertRun(r: RunEntity): Long
+
+    @Insert
+    suspend fun insertRuns(r: List<RunEntity>)
+
+    @Query("DELETE FROM runs WHERE id = :id")
+    suspend fun deleteRun(id: Long)
+
+    @Query("DELETE FROM runs")
+    suspend fun clearRuns()
+}

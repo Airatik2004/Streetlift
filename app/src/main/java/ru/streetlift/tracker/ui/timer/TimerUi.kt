@@ -289,14 +289,16 @@ fun TimerScreen() {
     val pager = androidx.compose.foundation.pager.rememberPagerState(
         initialPage = run {
             val rest = RestTimer.state.value
+            // Порядок: Бег / Отдых / Секундомер / Интервалы; по умолчанию — Бег
             when {
-                Stopwatch.state.value.active -> 1
-                IntervalTimer.state.value.active -> 2
-                rest.running || (!rest.idle && !rest.finished) -> 0
-                else -> 1
+                ru.streetlift.tracker.run.RunTracker.state.value.active -> 0
+                Stopwatch.state.value.active -> 2
+                IntervalTimer.state.value.active -> 3
+                rest.running || (!rest.idle && !rest.finished) -> 1
+                else -> 0
             }
         },
-    ) { 3 }
+    ) { 4 }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val sw by Stopwatch.state.collectAsStateWithLifecycle()
     val iv by IntervalTimer.state.collectAsStateWithLifecycle()
@@ -316,7 +318,7 @@ fun TimerScreen() {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        ModeSwitch(listOf("Отдых", "Секундомер", "Интервалы"), pager.currentPage) {
+        ModeSwitch(listOf("Бег", "Отдых", "Секундомер", "Интервалы"), pager.currentPage) {
             scope.launch { pager.animateScrollToPage(it) }
         }
         // Листается только блок режима (таймер + его настройки)
@@ -331,19 +333,22 @@ fun TimerScreen() {
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 when (page) {
-                    0 -> RestTimerPanel(recommendation = null, compact = false)
-                    1 -> StopwatchPanel(sw)
+                    0 -> ru.streetlift.tracker.run.RunPanel()
+                    1 -> RestTimerPanel(recommendation = null, compact = false)
+                    2 -> StopwatchPanel(sw)
                     else -> IntervalsPanel(iv, prefs, update)
                 }
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        ModeSettings(page, prefs, update)
+                if (page > 0) {
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            ModeSettings(page - 1, prefs, update)
+                        }
                     }
                 }
             }
         }
         // Общий блок звука стоит на месте; свайп по нему листает нижние вкладки (Цикл ↔ Таймер ↔ История)
-        SignalSettingsCard(prefs, update)
+        if (pager.currentPage > 0) SignalSettingsCard(prefs, update)
     }
 }
 
@@ -416,7 +421,8 @@ fun ModeSwitch(items: List<String>, selected: Int, onSelect: (Int) -> Unit) {
                 ) {
                     Text(
                         t,
-                        style = MaterialTheme.typography.labelLarge,
+                        style = if (items.size > 3) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         modifier = Modifier.padding(vertical = 10.dp),
                     )

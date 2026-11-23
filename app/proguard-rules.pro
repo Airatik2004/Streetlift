@@ -11,3 +11,7 @@
 # Room-сущности и enum'ы, которые попадают в JSON
 -keep class ru.streetlift.tracker.data.db.** { *; }
 -keep enum ru.streetlift.tracker.domain.** { *; }
+
+# osmdroid
+-dontwarn org.osmdroid.**
+-keep class org.osmdroid.** { *; }

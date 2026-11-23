@@ -284,3 +284,27 @@ data class StageArchiveEntity(
     val roundsAtWeight: Int,
     val archivedAt: Long,
 )
+
+/** Рекорд, введённый вручную: один подход упражнения (по названию) на стадии и весе, с датой. */
+@Serializable
+@Entity(tableName = "manual_records")
+data class ManualRecordEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val exerciseName: String,
+    val leverageStage: String? = null,
+    val weightKg: Float,
+    /** Повторы (или секунды у статики). */
+    val value: Int,
+    val isSeconds: Boolean = false,
+    val epochDay: Long,
+)
+
+/** Пробежка: время без пауз и маршрут («lat,lon;lat,lon|…», отрезки между паузами через «|»). */
+@Serializable
+@Entity(tableName = "runs")
+data class RunEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val startedAt: Long,
+    val durationMs: Long,
+    val route: String,
+)

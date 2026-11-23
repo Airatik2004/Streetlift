@@ -3,7 +3,7 @@ package ru.streetlift.tracker.ui
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
@@ -40,7 +40,7 @@ private val tabs = listOf(
     Tab("home", "Главная", Icons.Filled.Home),
     Tab("editor", "Цикл", Icons.Filled.Tune),
     Tab("timer", "Таймер", Icons.Filled.Timer),
-    Tab("history", "История", Icons.Filled.History),
+    Tab("stats", "Статистика", Icons.Filled.BarChart),
 )
 
 @Composable
@@ -108,7 +108,7 @@ fun AppRoot(repo: WorkoutRepository) {
                         0 -> HomeScreen(repo, onOpenWorkout = { id -> nav.navigate("workout/$id") })
                         1 -> EditorScreen(repo)
                         2 -> TimerScreen()
-                        else -> HistoryScreen(repo)
+                        else -> ru.streetlift.tracker.ui.stats.StatsScreen(repo)
                     }
                 }
             }

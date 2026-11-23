@@ -22,6 +22,7 @@ class StreetLiftApp : Application() {
         appScope.launch { repository.ensureSeeded() }
         TimerService.createChannels(this)
         ru.streetlift.tracker.reminder.Reminders.createChannel(this)
+        ru.streetlift.tracker.run.RunService.createChannel(this)
         // Напоминания переставляются при каждом изменении настроек (тренировка, перенос, время)
         appScope.launch {
             repository.settings.collect { ru.streetlift.tracker.reminder.Reminders.reschedule(this@StreetLiftApp, it) }

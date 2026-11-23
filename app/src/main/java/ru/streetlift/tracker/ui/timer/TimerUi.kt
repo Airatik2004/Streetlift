@@ -285,7 +285,18 @@ fun RestTimerPanel(
 @Composable
 fun TimerScreen() {
     val ctx = LocalContext.current
-    val pager = androidx.compose.foundation.pager.rememberPagerState { 3 }
+    // По умолчанию — секундомер; если он стоит, а работают интервалы или отдых — открыть работающий режим
+    val pager = androidx.compose.foundation.pager.rememberPagerState(
+        initialPage = run {
+            val rest = RestTimer.state.value
+            when {
+                Stopwatch.state.value.active -> 1
+                IntervalTimer.state.value.active -> 2
+                rest.running || (!rest.idle && !rest.finished) -> 0
+                else -> 1
+            }
+        },
+    ) { 3 }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val sw by Stopwatch.state.collectAsStateWithLifecycle()
     val iv by IntervalTimer.state.collectAsStateWithLifecycle()

@@ -71,6 +71,11 @@ class RunService : Service() {
         startLocation()
         if (ticker == null) {
             ticker = scope.launch {
+                if (RunTracker.state.value.phase == RunTracker.Phase.COUNTDOWN) {
+                    // Разбудить звук до первого пика отсчёта
+                    ru.streetlift.tracker.timer.SignalPlayer.warmUp(this@RunService)
+                    delay(400)
+                }
                 while (isActive && RunTracker.state.value.active) {
                     val s = RunTracker.state.value
                     if (s.phase == RunTracker.Phase.COUNTDOWN) ru.streetlift.tracker.timer.Beeper.pip()

@@ -60,7 +60,41 @@ object SignalPlayer {
         return list
     }
 
+    /** Когда последний раз что-то звучало (elapsedRealtime). */
+    @Volatile
+    private var lastSoundAt = 0L
+
+    /** После такой тишины вывод (динамик / наушники) «засыпает» и глотает начало звука. */
+    private const val SLEEP_AFTER_MS = 2_500L
+
+    /** Сколько ждать после «будящей» тишины. */
+    private const val WAKE_MS = 350L
+
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** Разбудить вывод заранее (перед отсчётом): неслышная тишина ~0,8 с. */
+    fun warmUp(ctx: Context) {
+        lastSoundAt = android.os.SystemClock.elapsedRealtime()
+        playNow(ctx, rawUri(ctx, R.raw.timer_silence), 900)
+    }
+
+    /**
+     * Сыграть звук. Если перед этим долго было тихо — сначала тишина, чтобы вывод проснулся,
+     * и сам звук через [WAKE_MS]: иначе первый пик пропадает целиком.
+     */
     private fun play(ctx: Context, uri: Uri, maxMs: Long?) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val asleep = now - lastSoundAt > SLEEP_AFTER_MS
+        lastSoundAt = now
+        if (asleep) {
+            playNow(ctx, rawUri(ctx, R.raw.timer_silence), 900)
+            main.postDelayed({ playNow(ctx, uri, maxMs) }, WAKE_MS)
+        } else {
+            playNow(ctx, uri, maxMs)
+        }
+    }
+
+    private fun playNow(ctx: Context, uri: Uri, maxMs: Long?) {
         val p = TimerPrefs.load(ctx)
         val app = ctx.applicationContext
         for (dev in targets(app, p)) {

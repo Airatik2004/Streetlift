@@ -53,15 +53,20 @@ object Stopwatch {
         val delaySec = if (s.elapsedMs == 0L) prefs.stopwatchDelay else 0
         job?.cancel()
         TimerService.ensureRunning(context)
+        val fromZero = s.elapsedMs == 0L
         job = scope.launch {
             if (delaySec > 0) {
+                // Разбудить звук заранее, чтобы первый пик отсчёта не пропал
+                SignalPlayer.warmUp(context)
+                delay(400)
                 for (left in delaySec downTo 1) {
                     _state.value = _state.value.copy(countdown = left, owner = owner)
                     Beeper.pip()
                     delay(1_000)
                 }
             }
-            Beeper.whistle()
+            // Свисток — только при старте с нуля, не после паузы
+            if (fromZero) Beeper.whistle()
             baseMs = _state.value.elapsedMs
             startedAt = now()
             _state.value = _state.value.copy(countdown = 0, running = true, owner = owner)

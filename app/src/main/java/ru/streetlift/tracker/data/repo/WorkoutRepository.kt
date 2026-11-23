@@ -39,7 +39,6 @@ class WorkoutRepository(private val db: AppDatabase) {
 
     val manualRecords: Flow<List<ru.streetlift.tracker.data.db.ManualRecordEntity>> = statsDao.observeManual()
     val runs: Flow<List<ru.streetlift.tracker.data.db.RunEntity>> = statsDao.observeRuns()
-    val allSets: Flow<List<SetLogEntity>> = sessionDao.observeAllSets()
 
     suspend fun addManualRecord(r: ru.streetlift.tracker.data.db.ManualRecordEntity) { statsDao.insertManual(r) }
     suspend fun deleteManualRecord(id: Long) = statsDao.deleteManual(id)

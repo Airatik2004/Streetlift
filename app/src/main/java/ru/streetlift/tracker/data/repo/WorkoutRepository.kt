@@ -174,14 +174,20 @@ class WorkoutRepository(private val db: AppDatabase) {
 
     suspend fun hasActiveSession(): Boolean = sessionDao.getActive() != null
 
-    /** Слабая сторона по прошлой тренировке упражнения: меньше повторов в сумме; поровну или нет данных — левая. */
+    /**
+     * Слабая сторона по прошлой тренировке упражнения: меньше повторов в сумме;
+     * поровну — ближе к отказу (меньше RIR в сумме); и это поровну или нет данных — левая.
+     */
     suspend fun weakSide(exerciseName: String, excludeSession: Long): String {
         val sided = sessionDao.getAllSets().filter { it.exerciseName == exerciseName && it.side != null && it.sessionId != excludeSession }
         val last = sided.maxOfOrNull { it.sessionId } ?: return "L"
         val s = sided.filter { it.sessionId == last }
-        val l = s.filter { it.side == "L" }.sumOf { it.reps }
-        val r = s.filter { it.side == "R" }.sumOf { it.reps }
-        return if (r < l) "R" else "L"
+        val left = s.filter { it.side == "L" }
+        val right = s.filter { it.side == "R" }
+        val lReps = left.sumOf { it.reps }
+        val rReps = right.sumOf { it.reps }
+        if (lReps != rReps) return if (rReps < lReps) "R" else "L"
+        return if (right.sumOf { it.rir } < left.sumOf { it.rir }) "R" else "L"
     }
 
     // ---------------- Подводка к старту ----------------

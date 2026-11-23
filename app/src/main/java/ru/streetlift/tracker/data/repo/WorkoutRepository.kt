@@ -474,11 +474,6 @@ class WorkoutRepository(private val db: AppDatabase) {
         settingsDao.upsert(getSettings().copy(priorityMode = mode))
     }
 
-    suspend fun setDeloadEvery(n: Int) {
-        val s = getSettings()
-        settingsDao.upsert(s.copy(deloadEvery = n.coerceIn(2, 12)))
-    }
-
     suspend fun setAutoStartTimer(enabled: Boolean) {
         val s = getSettings()
         settingsDao.upsert(s.copy(autoStartTimer = enabled))
@@ -694,6 +689,8 @@ class WorkoutRepository(private val db: AppDatabase) {
                 data.settings.copy(
                     id = 1,
                     setupDone = true,
+                    // Плановая разгрузка всегда на 5-м цикле, даже если в файле другое число
+                    deloadEvery = SettingsEntity.DELOAD_EVERY,
                     currentDayIndex = data.settings.currentDayIndex.coerceIn(0, days.size - 1),
                 ),
             )

@@ -25,7 +25,8 @@ data class SettingsEntity(
     val currentDayIndex: Int = 0,
     val cycleInMeso: Int = 1,
     val completedRounds: Int = 0,
-    val deloadEvery: Int = 5,
+    /** Плановая разгрузка — каждый 5-й цикл упражнения; в приложении не меняется. */
+    val deloadEvery: Int = SettingsEntity.DELOAD_EVERY,
     val deloadOverride: DeloadOverride = DeloadOverride.AUTO,
     /** Дата следующей тренировки (LocalDate.toEpochDay), null — сегодня. */
     val nextWorkoutEpochDay: Long? = null,
@@ -61,6 +62,11 @@ data class SettingsEntity(
     /** День выбран вручную (выбор/пропуск) — автоматический выбор дня на пике не вмешивается. */
     val manualDay: Boolean = false,
 ) {
+    companion object {
+        /** Плановая разгрузка всегда на 5-м цикле (у задней дельты — 9-я и 10-я тренировки). */
+        const val DELOAD_EVERY = 5
+    }
+
     /** Сколько дней прошло после запланированной даты тренировки (0 — не пропущено). */
     fun missedDays(today: Long): Long = (today - (nextWorkoutEpochDay ?: today)).coerceAtLeast(0)
 

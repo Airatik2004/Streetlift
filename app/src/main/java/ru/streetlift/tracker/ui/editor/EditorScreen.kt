@@ -73,7 +73,6 @@ class EditorViewModel(private val repo: WorkoutRepository) : ViewModel() {
 
     fun saveExercise(e: ExerciseEntity) = viewModelScope.launch { repo.saveExercise(e) }
     fun setAlternating(day: DayEntity, on: Boolean) = viewModelScope.launch { repo.updateDay(day.copy(alternating = on)) }
-    fun setDeloadEvery(n: Int) = viewModelScope.launch { repo.setDeloadEvery(n) }
     fun setDeload(want: Boolean) = viewModelScope.launch { repo.setDeload(want) }
     fun setBands(b: List<ru.streetlift.tracker.domain.Band>) = viewModelScope.launch { repo.setBands(b) }
     fun setReminders(s: SettingsEntity) =
@@ -188,23 +187,6 @@ fun EditorScreen(repo: WorkoutRepository) {
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Плановая разгрузка", style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                "каждый ${s.deloadEvery}-й цикл упражнения (у задней дельты цикл — 2 тренировки)",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Stepper(
-                            label = "N",
-                            value = s.deloadEvery.toString(),
-                            onMinus = { vm.setDeloadEvery(s.deloadEvery - 1) },
-                            onPlus = { vm.setDeloadEvery(s.deloadEvery + 1) },
-                        )
-                    }
-                    HorizontalDivider()
                     ReminderSettings(s) { vm.setReminders(it) }
                     HorizontalDivider()
                     Row(

@@ -191,7 +191,7 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
                 // Мезоцикл одной строкой; разгрузку выбирают во вкладке «Цикл»
                 val left = (s.deloadEvery - s.cycleInMeso).coerceAtLeast(0)
                 val deloadText = when {
-                    ui.phase != PeakPhase.NONE -> "подводка к старту"
+                    ui.phase != PeakPhase.NONE -> "выход на пик"
                     ui.globalDeload -> "разгрузка"
                     left == 0 -> "плановая разгрузка отменена"
                     else -> "разгрузка через $left ${plural(left, "цикл", "цикла", "циклов")}"
@@ -362,7 +362,7 @@ private fun PreviewRow(p: ExercisePreview) {
     if (plan == null) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(e.name, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-            Tag("Пропуск · подводка", MaterialTheme.colorScheme.onSurfaceVariant)
+            Tag("Пропуск · выход на пик", MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
@@ -425,14 +425,14 @@ private fun PeakCard(ui: HomeUiState, onEdit: () -> Unit, onClear: () -> Unit) {
     val date = s.peakEpochDay
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Подводка к старту", style = MaterialTheme.typography.titleMedium)
+            Text("Выход на пик", style = MaterialTheme.typography.titleMedium)
             if (date == null) {
                 Text(
                     "Выберите дату старта/проходки и упражнения для выхода на пик — за 22 дня план перестроится сам.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                OutlinedButton(onClick = onEdit) { Text("Настроить подводку") }
+                OutlinedButton(onClick = onEdit) { Text("Настроить выход на пик") }
             } else {
                 val days = ui.daysToStart ?: 0
                 Text(
@@ -441,7 +441,7 @@ private fun PeakCard(ui: HomeUiState, onEdit: () -> Unit, onClear: () -> Unit) {
                     style = MaterialTheme.typography.bodyLarge,
                 )
                 Tag(
-                    if (ui.phase == PeakPhase.NONE) "Обычный цикл — подводка начнётся за 22 дня" else ui.phase.title,
+                    if (ui.phase == PeakPhase.NONE) "Обычный цикл — выход на пик начнётся за 22 дня" else ui.phase.title,
                     if (ui.phase == PeakPhase.REST) DeloadGreen else MaterialTheme.colorScheme.primary,
                 )
                 val names = ui.allExercises.filter { it.id in s.peakIds }.map { it.name }
@@ -492,7 +492,7 @@ private fun PeakDialog(
 
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Подводка к старту") },
+        title = { Text("Выход на пик") },
         text = {
             Column(
                 Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()),

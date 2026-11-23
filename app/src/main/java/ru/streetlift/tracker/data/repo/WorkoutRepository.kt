@@ -179,7 +179,7 @@ class WorkoutRepository(private val db: AppDatabase) {
 
         val lines = mutableListOf<String>()
         val peak = session.peakPhase?.let { runCatching { PeakPhase.valueOf(it) }.getOrNull() }
-        if (peak != null) lines += "Подводка к старту (${peak.title}) — рабочий план не меняется, результаты в истории."
+        if (peak != null) lines += "Выход на пик (${peak.title}) — рабочий план не меняется, результаты в истории."
         val updated = if (peak != null) emptyList() else exercises.map { ex ->
             val exLogs = logs.filter { it.exerciseId == ex.id }
             val wasDeload = session.isDeload || ex.emergencyDeloadNext

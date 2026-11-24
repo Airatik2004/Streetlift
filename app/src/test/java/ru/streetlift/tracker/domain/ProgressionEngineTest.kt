@@ -302,4 +302,45 @@ class ProgressionEngineTest {
         assertEquals("Фулл", LeverageStages.builtIn.last().name)
         assertTrue(LeverageStages.builtIn.any { it.name == LeverageStages.DEFAULT })
     }
+
+    @Test
+    fun plateau_resetTwoStepsThenShiftRepsOnSecondTime() {
+        val cfg = heavy.copy(weightStep = 1.25f)
+        var st = PlanState(weightKg = 10f, plannedSets = 4, targetReps = 6)
+        val same = sets(10f, 6 to 2, 6 to 2, 6 to 2, 6 to 2)
+        var r = ProgressionEngine.computeNext(cfg, st, same, false)
+        repeat(3) {
+            st = r.state
+            assertEquals(Decision.HOLD, r.decision)
+            r = ProgressionEngine.computeNext(cfg, st, same, false)
+        }
+        // 3 тренировки без роста после лучшей — сброс на 2 ступени
+        assertEquals(Decision.PLATEAU_RESET, r.decision)
+        assertEquals(7.5f, r.state.weightKg, 0.001f)
+        assertEquals(4, r.state.plannedSets)
+        assertEquals(10f, r.state.resetWeight!!, 0.001f)
+        assertEquals(1, r.state.resetCount)
+        assertEquals(0, r.state.repShift)
+
+        // Снова упёрлись в 10 кг — второй раз: коридор ниже
+        st = PlanState(
+            weightKg = 10f, plannedSets = 4, targetReps = 6, lastScore = 8f, lastScoreWeight = 10f,
+            bestTotal = 24, stallRounds = 2, resetWeight = 10f, resetCount = 1,
+        )
+        r = ProgressionEngine.computeNext(cfg, st, same, false)
+        assertEquals(Decision.PLATEAU_RESET, r.decision)
+        assertEquals(2, r.state.resetCount)
+        assertEquals(1, r.state.repShift)
+    }
+
+    @Test
+    fun growingReps_isNotPlateau() {
+        val cfg = heavy.copy(weightStep = 1.25f)
+        var st = PlanState(weightKg = 10f, plannedSets = 4, targetReps = 5)
+        for (reps in 5..7) {
+            val r = ProgressionEngine.computeNext(cfg, st, sets(10f, reps to 2, reps to 2, reps to 2, reps to 2), false)
+            assertEquals(0, r.state.stallRounds)
+            st = r.state
+        }
+    }
 }

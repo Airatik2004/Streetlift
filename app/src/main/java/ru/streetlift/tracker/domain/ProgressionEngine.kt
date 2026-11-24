@@ -46,11 +46,21 @@ data class PlanState(
     val ceilingStreak: Int = 0,
     /** Потолок стадии достигнут — пора на следующую стадию. */
     val stageCeiling: Boolean = false,
+    /** Лучшая сумма повторов на текущем весе — для поиска плато. */
+    val bestTotal: Int? = null,
+    /** Тренировок подряд без роста суммы повторов на текущем весе. */
+    val stallRounds: Int = 0,
+    /** Вес, на котором было последнее плато (сброс и разгон). */
+    val resetWeight: Float? = null,
+    /** Сколько раз подряд упирались в плато на [resetWeight]. */
+    val resetCount: Int = 0,
+    /** Коридор повторов сдвинут вниз (второе плато на одном весе): 6–10 → 5–8. */
+    val repShift: Int = 0,
 )
 
 data class SetResult(val weightKg: Float, val reps: Int, val rir: Int)
 
-enum class Decision { NOT_PERFORMED, INCREASE_WEIGHT, ADD_VOLUME, HOLD, REDUCE_VOLUME, DELOAD_DONE, CALIBRATED, STAGE_CEILING }
+enum class Decision { NOT_PERFORMED, INCREASE_WEIGHT, ADD_VOLUME, HOLD, REDUCE_VOLUME, DELOAD_DONE, CALIBRATED, STAGE_CEILING, PLATEAU_RESET }
 
 data class ProgressionResult(
     val state: PlanState,
@@ -95,6 +105,8 @@ object ProgressionEngine {
 
     /** Калибровка: 3 рабочих подхода в коридоре повторений с запасом 2. */
     const val CALIBRATION_SETS = 3
+    /** Тренировок подряд без роста суммы повторов на одном весе — плато. */
+    const val PLATEAU_ROUNDS = 3
     const val CALIBRATION_RIR = 2
 
     /** Доля подходов, которая остаётся в разгрузке (срез 40–50% с округлением вверх). */
@@ -236,6 +248,15 @@ object ProgressionEngine {
             streak = 0
         }
 
+        // Поиск плато: сумма повторов на одном весе не растёт PLATEAU_ROUNDS тренировок подряд
+        val total = sets.sumOf { it.reps }
+        val sameWeight = state.lastScoreWeight != null && abs(state.lastScoreWeight - work) < 0.001f
+        val best = if (sameWeight) state.bestTotal else null
+        val improved = best == null || total > best
+        val stall = if (improved) 0 else state.stallRounds + 1
+        val newBest = if (best == null) total else max(best, total)
+        val plateau = !allMax && !fatigue && !reduced && !emergency && stall >= PLATEAU_ROUNDS
+
         val next: PlanState
         val decision: Decision
         val msg: String
@@ -248,6 +269,7 @@ object ProgressionEngine {
                     weightKg = work, plannedSets = config.maxSets, targetReps = config.maxReps,
                     roundsAtWeight = state.roundsAtWeight + 1, declineStreak = 0, emergencyDeloadNext = false,
                     lastScore = score, lastScoreWeight = work, ceilingStreak = 0, stageCeiling = false,
+                    bestTotal = newBest, stallRounds = 0,
                 )
                 decision = Decision.ADD_VOLUME
                 emergency = false
@@ -261,6 +283,7 @@ object ProgressionEngine {
                     weightKg = work, plannedSets = config.maxSets, targetReps = config.maxReps,
                     roundsAtWeight = state.roundsAtWeight + 1, declineStreak = 0, emergencyDeloadNext = false,
                     lastScore = score, lastScoreWeight = work, ceilingStreak = streakNow, stageCeiling = ceiling,
+                    bestTotal = newBest, stallRounds = 0,
                 )
                 decision = if (ceiling) Decision.STAGE_CEILING else Decision.HOLD
                 emergency = false
@@ -274,10 +297,15 @@ object ProgressionEngine {
             allMax && !fatigue -> {
                 // Ступень тяжелее: резина слабее → свой вес → +шаг
                 val newWeight = config.scale.up(work)
+                // Прошли вес прошлого плато — сдвиг коридора и счётчик плато больше не нужны
+                val passed = state.resetWeight == null || newWeight > state.resetWeight + 0.001f
                 next = PlanState(
                     weightKg = newWeight,
                     plannedSets = config.minSets,
                     targetReps = config.minReps,
+                    resetWeight = if (passed) null else state.resetWeight,
+                    resetCount = if (passed) 0 else state.resetCount,
+                    repShift = if (passed) 0 else state.repShift,
                 )
                 decision = Decision.INCREASE_WEIGHT
                 emergency = false
@@ -299,10 +327,33 @@ object ProgressionEngine {
                     lastScoreWeight = work,
                     ceilingStreak = 0,
                     stageCeiling = false,
+                    // Утомление не считается тренировкой «без роста»
+                    bestTotal = newBest,
+                    stallRounds = if (sameWeight) state.stallRounds else 0,
                 )
                 decision = Decision.REDUCE_VOLUME
                 val why = if (belowMin) "повторы ниже ${config.minReps}" else "RIR 0 в $zeroRir подходах"
                 msg = "утомление ($why) — вес ${Fmt.weight(work)} сохранён, подходов: $newSets"
+            }
+
+            plateau -> {
+                // Плато: сброс на 2 ступени вниз с полным объёмом и разгон заново по 1,25
+                val again = state.resetWeight != null && abs(state.resetWeight - work) < 0.001f
+                val count = if (again) state.resetCount + 1 else 1
+                val down = config.scale.down(config.scale.down(work))
+                val shift = if (count >= 2) 1 else state.repShift
+                next = PlanState(
+                    weightKg = down,
+                    plannedSets = config.maxSets,
+                    targetReps = config.minReps,
+                    resetWeight = work,
+                    resetCount = count,
+                    repShift = shift,
+                )
+                decision = Decision.PLATEAU_RESET
+                msg = "плато: $PLATEAU_ROUNDS тренировки на ${Fmt.weight(work)} без роста повторов — " +
+                    "сброс до ${Fmt.weight(down)}, ${config.maxSets} подходов, и разгон заново" +
+                    if (shift > state.repShift) "; второе плато на этом весе — коридор повторов ниже (больше силы)" else ""
             }
 
             else -> {
@@ -325,6 +376,8 @@ object ProgressionEngine {
                     lastScoreWeight = work,
                     ceilingStreak = 0,
                     stageCeiling = false,
+                    bestTotal = newBest,
+                    stallRounds = stall,
                 )
                 decision = if (newSets > planned) Decision.ADD_VOLUME else Decision.HOLD
                 msg = if (reduced) {

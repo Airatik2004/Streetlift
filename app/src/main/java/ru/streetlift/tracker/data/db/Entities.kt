@@ -158,6 +158,12 @@ data class ExerciseEntity(
     val jumpNextKg: Float? = null,
     val jumpNextReps: Int? = null,
     val jumpRetryKg: Float? = null,
+    /** Плато (v21): лучшая сумма повторов на весе, тренировок без роста, вес плато, сколько раз, сдвиг коридора. */
+    val bestTotal: Int? = null,
+    val stallRounds: Int = 0,
+    val resetWeight: Float? = null,
+    val resetCount: Int = 0,
+    val repShift: Int = 0,
 ) {
     /** Прыжки на тумбу — прогрессия по высоте (Jumps). */
     val isJump: Boolean get() = name == JUMP_NAME
@@ -219,8 +225,12 @@ data class ExerciseEntity(
     val loadScale: ru.streetlift.tracker.domain.LoadScale
         get() = ru.streetlift.tracker.domain.LoadScale(weightStep, if (allowBands) ru.streetlift.tracker.domain.Bands.ladder() else emptyList())
 
+    /** Коридор повторов с учётом сдвига после второго плато на одном весе: 6–10 → 5–8. */
+    val effMinReps: Int get() = if (repShift > 0 && !isSeconds) (minReps - 1).coerceAtLeast(1) else minReps
+    val effMaxReps: Int get() = if (repShift > 0 && !isSeconds) (maxReps - 2).coerceAtLeast(effMinReps + 1) else maxReps
+
     fun toConfig() = ExerciseConfig(
-        minSets, maxSets, minReps, maxReps, targetRirMin, targetRirMax, weightStep, isSeconds,
+        minSets, maxSets, effMinReps, effMaxReps, targetRirMin, targetRirMax, weightStep, isSeconds,
         assists = loadScale.assists,
     )
 
@@ -236,6 +246,11 @@ data class ExerciseEntity(
         mode = mode,
         ceilingStreak = ceilingStreak,
         stageCeiling = stageCeiling,
+        bestTotal = bestTotal,
+        stallRounds = stallRounds,
+        resetWeight = resetWeight,
+        resetCount = resetCount,
+        repShift = repShift,
     )
 
     /** Стадия не финальная и вес ≥ 0 — вес не растёт, подсказываем сменить стадию. */
@@ -255,6 +270,11 @@ data class ExerciseEntity(
         mode = s.mode,
         ceilingStreak = s.ceilingStreak,
         stageCeiling = s.stageCeiling,
+        bestTotal = s.bestTotal,
+        stallRounds = s.stallRounds,
+        resetWeight = s.resetWeight,
+        resetCount = s.resetCount,
+        repShift = s.repShift,
     )
 }
 

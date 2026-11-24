@@ -19,7 +19,8 @@ android {
         applicationId = "ru.streetlift.tracker"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
+        // Номер сборки CI — каждая новая сборка «новее», Android ставит её поверх
+        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
         versionName = "1.0.0"
     }
 

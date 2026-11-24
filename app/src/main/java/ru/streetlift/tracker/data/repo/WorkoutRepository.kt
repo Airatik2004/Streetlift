@@ -577,6 +577,8 @@ class WorkoutRepository(private val db: AppDatabase) {
                 emergencyDeloadNext = false,
                 lastScore = null,
                 lastScoreWeight = null,
+                // Вес задан вручную — счёт плато с нуля
+                bestTotal = null, stallRounds = 0, resetWeight = null, resetCount = 0, repShift = 0,
             ).let { if (it.isJump) it.copy(
                 heightCm = d.heightCm?.let(ru.streetlift.tracker.domain.Jumps::snapHeight), weightKg = 0f, targetReps = 3, plateauCm = null,
                 jumpBlock = 0, jumpBlockCm = null, jumpStep = 0, jumpRollback = false,

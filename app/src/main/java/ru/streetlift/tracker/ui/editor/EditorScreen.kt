@@ -509,7 +509,8 @@ private fun ExerciseRow(e: ExerciseEntity, s: SettingsEntity, block: Int, ahead:
             if (e.mode == ExerciseMode.CALIBRATION && !ahead) Tag("Калибровка", MaterialTheme.colorScheme.secondary)
         }
         Text(
-            "${Fmt.range(e.minSets, e.maxSets)} × ${Fmt.range(e.minReps, e.maxReps)}${if (e.isSeconds) " с" else ""} · " +
+            "${Fmt.range(e.minSets, e.maxSets)} × ${Fmt.range(e.effMinReps, e.effMaxReps)}${if (e.isSeconds) " с" else ""}" +
+                (if (e.repShift > 0) " (коридор ниже после плато)" else "") + " · " +
                 "${Fmt.rir(e.targetRirMin, e.targetRirMax)} · шаг ${Fmt.step(e.weightStep)} кг",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

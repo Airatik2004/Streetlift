@@ -577,7 +577,11 @@ class WorkoutRepository(private val db: AppDatabase) {
                 emergencyDeloadNext = false,
                 lastScore = null,
                 lastScoreWeight = null,
-            ).let { if (it.isJump) it.copy(heightCm = d.heightCm, weightKg = 0f, targetReps = 3, plateauCm = null) else it }
+            ).let { if (it.isJump) it.copy(
+                heightCm = d.heightCm?.let(ru.streetlift.tracker.domain.Jumps::snapHeight), weightKg = 0f, targetReps = 3, plateauCm = null,
+                jumpBlock = 0, jumpBlockCm = null, jumpStep = 0, jumpRollback = false,
+                jumpNextKg = null, jumpNextReps = null, jumpRetryKg = null,
+            ) else it }
         }
         if (updated.isNotEmpty()) {
             programDao.updateExercises(updated)
@@ -668,7 +672,16 @@ class WorkoutRepository(private val db: AppDatabase) {
                     leverageStage = stage ?: e.leverageStage,
                     plannedSets = old.plannedSets.coerceIn(maxOf(1, e.minSets - 1), e.maxSets),
                     targetReps = old.targetReps.coerceIn(e.minReps, e.maxReps),
-                )
+                ).let { ne ->
+                    // Прыжки: высота и блок пробивки; старая высота с шагом 5 см — вниз до кратной 15
+                    val js = old.jumpState
+                    if (!ne.isJump || js == null) ne
+                    else ne.withJump(
+                        if (js.heightCm % ru.streetlift.tracker.domain.Jumps.STEP_CM != 0 || (js.plateauCm ?: 0) % ru.streetlift.tracker.domain.Jumps.STEP_CM != 0) {
+                            ru.streetlift.tracker.domain.Jumps.State(ru.streetlift.tracker.domain.Jumps.snapHeight(js.heightCm))
+                        } else js,
+                    ).copy(mode = old.mode)
+                }
             }
             programDao.updateExercises(restored)
 

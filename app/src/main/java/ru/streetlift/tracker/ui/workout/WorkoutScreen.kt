@@ -456,7 +456,7 @@ private fun WorkPanel(
     }
     Text(
         when {
-            cur.exercise.isJump && plan.isCalibration -> "Калибровка: подберите высоту, на которую уверенно делаете ${plan.targetReps} прыжка"
+            cur.exercise.isJump && plan.isCalibration -> "Калибровка: поставьте максимальную высоту (кратно 15 см), на которую уверенно прыгаете, без веса"
             cur.exercise.isJump -> "${plan.heightCm} см · ${Fmt.weight(plan.weightKg)} · ${plan.targetReps} прыжков, чистое приземление"
             plan.isCalibration -> "Калибровка: подберите вес/стадию на ${Fmt.range(plan.repsMin, plan.repsMax)} $unit с запасом ${plan.rirMin}"
             else -> "${Fmt.weight(plan.weightKg)} · ${Fmt.range(plan.repsMin, plan.repsMax)} ${unit} (цель ${plan.targetReps}+) · ${Fmt.rir(plan.rirMin, plan.rirMax)}"
@@ -484,20 +484,23 @@ private fun WorkPanel(
     }
 
     if (cur.exercise.isJump) {
-        // Прыжки: высота ±5 см и вес 0 / 2,5 / 5 кг
+        // Прыжки: высота ±15 см (тумбы друг на друга), вес по плану
         Stepper(
             label = "Высота, см",
             value = "$height",
             onMinus = { onHeight((height - ru.streetlift.tracker.domain.Jumps.STEP_CM).coerceAtLeast(ru.streetlift.tracker.domain.Jumps.MIN_CM)) },
             onPlus = { onHeight(height + ru.streetlift.tracker.domain.Jumps.STEP_CM) },
         )
-        Spacer(Modifier.height(6.dp))
-        Stepper(
-            label = "Вес",
-            value = Fmt.weightValue(weight),
-            onMinus = { onWeight((weight - 2.5f).coerceAtLeast(0f)) },
-            onPlus = { onWeight((weight + 2.5f).coerceAtMost(ru.streetlift.tracker.domain.Jumps.HEAVY_KG)) },
-        )
+        // Калибровка — только высота; вес — шаг 1,25 до 15 кг
+        if (!cur.plan.isCalibration) {
+            Spacer(Modifier.height(6.dp))
+            Stepper(
+                label = "Вес",
+                value = Fmt.weightValue(weight),
+                onMinus = { onWeight((weight - ru.streetlift.tracker.domain.Jumps.WEIGHT_STEP).coerceAtLeast(0f)) },
+                onPlus = { onWeight((weight + ru.streetlift.tracker.domain.Jumps.WEIGHT_STEP).coerceAtMost(ru.streetlift.tracker.domain.Jumps.MAX_KG)) },
+            )
+        }
     } else {
         ru.streetlift.tracker.ui.common.WeightStepper(
             weight = weight,

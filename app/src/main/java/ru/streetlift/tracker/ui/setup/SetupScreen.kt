@@ -82,7 +82,7 @@ fun SetupScreen(repo: WorkoutRepository) {
                     weight = e.loadScale.snap(e.weightKg),
                     // По умолчанию — подобрать на тренировке, если вес ещё не задан
                     calibrate = if (e.isJump) e.heightCm == null else e.mode == ExerciseMode.CALIBRATION || e.weightKg == 0f,
-                    height = e.heightCm ?: 50,
+                    height = e.heightCm ?: 60,
                 )
             }
         }

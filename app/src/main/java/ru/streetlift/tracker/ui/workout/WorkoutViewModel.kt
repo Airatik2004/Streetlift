@@ -69,7 +69,7 @@ class WorkoutViewModel(
                 defaultWeight = r.defaults.weight,
                 defaultReps = r.defaults.reps,
                 defaultRir = r.defaults.rir,
-                defaultHeight = r.defaults.height ?: 50,
+                defaultHeight = r.defaults.height ?: 60,
                 doneSets = r.doneSets,
                 plannedSets = r.plannedSets,
                 stepKey = r.stepKey,

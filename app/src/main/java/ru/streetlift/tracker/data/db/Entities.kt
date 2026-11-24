@@ -150,6 +150,14 @@ data class ExerciseEntity(
     /** Прыжки на тумбу: рабочая высота (null — ещё не калибровали) и высота плато, которую пробиваем. */
     val heightCm: Int? = null,
     val plateauCm: Int? = null,
+    /** Прыжки: блок пробивки (номер, для какой высоты, шаг), откат и промежуточный вес (v20). */
+    val jumpBlock: Int = 0,
+    val jumpBlockCm: Int? = null,
+    val jumpStep: Int = 0,
+    val jumpRollback: Boolean = false,
+    val jumpNextKg: Float? = null,
+    val jumpNextReps: Int? = null,
+    val jumpRetryKg: Float? = null,
 ) {
     /** Прыжки на тумбу — прогрессия по высоте (Jumps). */
     val isJump: Boolean get() = name == JUMP_NAME
@@ -165,11 +173,19 @@ data class ExerciseEntity(
     fun activeInSlot(slot: Int): Boolean = altSlot == null || altSlot == slot
 
     val jumpState: ru.streetlift.tracker.domain.Jumps.State?
-        get() = heightCm?.let { ru.streetlift.tracker.domain.Jumps.State(it, weightKg, targetReps, plateauCm, declineStreak) }
+        get() = heightCm?.let {
+            ru.streetlift.tracker.domain.Jumps.State(
+                it, weightKg, targetReps, plateauCm, declineStreak,
+                block = jumpBlock, blockCm = jumpBlockCm, step = jumpStep, rollback = jumpRollback,
+                nextKg = jumpNextKg, nextReps = jumpNextReps, retryKg = jumpRetryKg, deloadNext = emergencyDeloadNext,
+            )
+        }
 
     fun withJump(s: ru.streetlift.tracker.domain.Jumps.State) = copy(
         heightCm = s.heightCm, weightKg = s.weightKg, targetReps = s.reps, plateauCm = s.plateauCm, declineStreak = s.fails,
-        mode = ExerciseMode.ACTIVE, emergencyDeloadNext = false,
+        jumpBlock = s.block, jumpBlockCm = s.blockCm, jumpStep = s.step, jumpRollback = s.rollback,
+        jumpNextKg = s.nextKg, jumpNextReps = s.nextReps, jumpRetryKg = s.retryKg,
+        mode = ExerciseMode.ACTIVE, emergencyDeloadNext = s.deloadNext,
     )
 
     /** Одностороннее: подход — сначала одна сторона, потом другая (пистолетики, подтягивания на 1 руке). */

@@ -283,7 +283,7 @@ private fun CalibrationDialog(
     var deload by remember { mutableStateOf(exercise.emergencyDeloadNext) }
     var skipPlanned by remember { mutableStateOf(exercise.skipPlannedDeload == true) }
     var weight by remember { mutableStateOf(exercise.loadScale.snap(exercise.weightKg)) }
-    var height by remember { mutableStateOf(exercise.heightCm ?: 50) }
+    var height by remember { mutableStateOf(exercise.heightCm ?: 60) }
     var error by remember { mutableStateOf<String?>(null) }
     val stageChanged = stage != exercise.leverageStage
 

@@ -157,7 +157,7 @@ object ActiveWorkout {
                     isCalibration = cur.plan.isCalibration,
                     isSeconds = cur.exercise.isSeconds,
                     side = r.side,
-                    heightCm = if (cur.exercise.isJump) d.height ?: cur.plan.heightCm ?: 50 else null,
+                    heightCm = if (cur.exercise.isJump) d.height ?: cur.plan.heightCm ?: 60 else null,
                 ),
             )
             prefill.update { it - r.stepKey }

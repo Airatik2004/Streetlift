@@ -18,8 +18,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         StageArchiveEntity::class,
         ManualRecordEntity::class,
         RunEntity::class,
+        SkipEntity::class,
     ],
-    version = 29,
+    version = 30,
     // Схемы версий — в app/schemas, по ним тест проверяет миграции
     exportSchema = true,
 )
@@ -31,6 +32,17 @@ abstract class AppDatabase : RoomDatabase() {
 
     companion object {
         /** v28: самочувствие перед тренировкой. */
+        /** v30: пропущенные дни цикла с планом на момент пропуска. */
+        val MIGRATION_29_30 = object : Migration(29, 30) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `skipped_days` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`dayId` INTEGER, `dayName` TEXT NOT NULL, `skippedAt` INTEGER NOT NULL, `roundNumber` INTEGER NOT NULL, " +
+                        "`cycleInMeso` INTEGER, `priority` TEXT, `isDeload` INTEGER NOT NULL, `altSlot` INTEGER, `plan` TEXT)",
+                )
+            }
+        }
+
         /** v29: выход на пик в пауэрлифтинге — движение/сумма, ориентиры, начало подготовки. */
         val MIGRATION_28_29 = object : Migration(28, 29) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -276,7 +288,7 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         /** Все миграции по порядку — их же прогоняет тест миграций. */
-        val ALL_MIGRATIONS: Array<Migration> get() = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29)
+        val ALL_MIGRATIONS: Array<Migration> get() = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30)
 
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "streetlift.db")

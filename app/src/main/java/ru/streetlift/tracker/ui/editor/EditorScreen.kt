@@ -47,6 +47,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import ru.streetlift.tracker.data.db.DayEntity
@@ -69,6 +70,31 @@ data class EditorUi(
     val stages: List<StageEntity> = emptyList(),
     /** Последнее сделанное из пары пистолетики / прыжки. */
     val lastAlt: ru.streetlift.tracker.data.db.LastAlt? = null,
+    /** Предыдущий цикл: план, с каким выходил на каждый день; null — предыдущего цикла нет. */
+    val past: PastBlock? = null,
+    /** Данные пришли из базы (до этого — пустое состояние по умолчанию). */
+    val loaded: Boolean = false,
+)
+
+/** Один выход на день прошлого цикла: тренировка или пропуск, план из снимка. */
+data class PastEntry(
+    /** Дата; null — записи нет, план восстановлен. */
+    val at: Long?,
+    val skipped: Boolean,
+    /** Записи нет: «по следующему выполнению» (true) или по действующему плану (false); null — запись есть. */
+    val restoredFromNext: Boolean?,
+    /** Упражнения дня по плану; null — снимок не сохранился. */
+    val exercises: List<ExerciseEntity>?,
+    val deloadEvery: Int,
+    val isDeload: Boolean,
+    val slot: Int,
+    val priority: ru.streetlift.tracker.domain.Priority,
+)
+
+data class PastBlock(
+    val cycleInMeso: Int?,
+    val priority: ru.streetlift.tracker.domain.Priority?,
+    val days: List<Pair<DayEntity, List<PastEntry>>>,
 )
 
 class EditorViewModel(private val repo: WorkoutRepository) : ViewModel() {
@@ -81,9 +107,55 @@ class EditorViewModel(private val repo: WorkoutRepository) : ViewModel() {
         return v
     }
 
-    val state: StateFlow<EditorUi> = combine(repo.settings, repo.days, repo.exercises, repo.stages, repo.lastAlt) { s, d, e, st, la ->
+    private val program = combine(repo.settings, repo.days, repo.exercises, repo.stages, repo.lastAlt) { s, d, e, st, la ->
         EditorUi(s, d, e.groupBy { it.dayId }.mapValues { (_, v) -> v.sortedBy { it.position } }, st, la)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EditorUi())
+    }
+
+    val state: StateFlow<EditorUi> = combine(program, repo.finishedSessions, repo.skips) { ui, sessions, skips ->
+        val ev = ru.streetlift.tracker.domain.PastCycle.events(sessions, skips, ui.days.map { it.id }.toSet())
+        val r = ru.streetlift.tracker.domain.PastCycle.rounds(ev, ui.settings.completedRounds + 1)
+        ui.copy(past = if (r.previous.isEmpty()) null else pastBlock(ui, r), loaded = true)
+    }.flowOn(kotlinx.coroutines.Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EditorUi())
+
+    private fun decode(plan: String?) =
+        plan?.let { runCatching { ru.streetlift.tracker.data.backup.BackupJson.decodeRollback(it) }.getOrNull() }
+
+    private fun prio(p: String?) = p?.let { runCatching { ru.streetlift.tracker.domain.Priority.valueOf(it) }.getOrNull() }
+
+    private fun pastBlock(ui: EditorUi, r: ru.streetlift.tracker.domain.PastCycle.Rounds): PastBlock {
+        val s = ui.settings
+        val first = r.previous.first()
+        val days = ui.days.map { day ->
+            val evs = r.previous.filter { it.dayId == day.id }
+            val entries = if (evs.isNotEmpty()) {
+                evs.map { e ->
+                    val snap = decode(e.plan)
+                    PastEntry(
+                        at = e.at, skipped = e.skip != null, restoredFromNext = null,
+                        exercises = snap?.exercises?.sortedBy { it.position },
+                        deloadEvery = snap?.settings?.deloadEvery ?: s.deloadEvery,
+                        isDeload = e.isDeload, slot = e.altSlot, priority = prio(e.priority) ?: s.priority,
+                    )
+                }
+            } else {
+                // Записи нет (пропуск до этой версии или день перескочен) — план не менялся до следующего выполнения дня
+                val next = decode(ru.streetlift.tracker.domain.PastCycle.nextPlanFor(day.id, r.current))
+                listOf(
+                    PastEntry(
+                        at = null, skipped = true, restoredFromNext = next != null,
+                        exercises = (next?.exercises ?: ui.exercises[day.id].orEmpty()).sortedBy { it.position },
+                        deloadEvery = s.deloadEvery, isDeload = first.isDeload,
+                        slot = r.current.firstOrNull { it.dayId == day.id }?.altSlot
+                            ?: ru.streetlift.tracker.data.db.nextAltSlot(ui.lastAlt),
+                        priority = prio(first.priority) ?: s.priority,
+                    ),
+                )
+            }
+            day to entries
+        }
+        return PastBlock(first.cycleInMeso, prio(first.priority), days)
+    }
 
     fun saveExercise(e: ExerciseEntity) = viewModelScope.launch { repo.saveExercise(e) }
     fun setAlternating(day: DayEntity, on: Boolean) = viewModelScope.launch { repo.updateDay(day.copy(alternating = on)) }
@@ -101,7 +173,7 @@ class EditorViewModel(private val repo: WorkoutRepository) : ViewModel() {
  * Меняется только калибровка упражнения: текущий вес, стадия рычага, повторная калибровка.
  */
 @Composable
-fun EditorScreen(repo: WorkoutRepository) {
+fun EditorScreen(repo: WorkoutRepository, away: Boolean = false) {
     val vm: EditorViewModel = viewModel(factory = viewModelFactory { initializer { EditorViewModel(repo) } })
     val ui by vm.state.collectAsStateWithLifecycle()
     val s = ui.settings
@@ -110,8 +182,22 @@ fun EditorScreen(repo: WorkoutRepository) {
     var editExercise by remember { mutableStateOf<ExerciseEntity?>(null) }
     var editBands by remember { mutableStateOf(false) }
 
+    // Предыдущий цикл — выше текущего; вкладка всегда открывается на текущем.
+    // Перематываем, пока вкладка не на экране (и один раз при загрузке), чтобы список не дёргался на глазах.
+    val past = ui.past
+    val currentHead = 1 + if (past != null) 1 + past.days.size else 0
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    var placedOnce by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(away, currentHead, ui.loaded) {
+        if (ui.loaded && (away || !placedOnce)) {
+            listState.scrollToItem(currentHead)
+            placedOnce = true
+        }
+    }
+
     LazyColumn(
         Modifier.fillMaxSize(),
+        state = listState,
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -133,6 +219,32 @@ fun EditorScreen(repo: WorkoutRepository) {
         val peakOn = ru.streetlift.tracker.domain.Peaking.phaseOn(s.peakEpochDay, workoutDay, s.peakSpanDays) !=
             ru.streetlift.tracker.domain.PeakPhase.NONE
         val peakIds = if (peakOn) s.peakIds else emptySet()
+        if (past != null) {
+            item(key = "head_prev") {
+                Column {
+                    Text("Предыдущий цикл", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    val cyc = past.cycleInMeso
+                    if (cyc != null) {
+                        Text(
+                            past.priority?.let { ru.streetlift.tracker.domain.Priority.cycleLabel(it, cyc, s.deloadEvery) }
+                                ?: "Цикл $cyc из ${s.deloadEvery}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            items(past.days, key = { "dprev_${it.first.id}" }) { (day, entries) ->
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("День ${day.position + 1} из 4", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        Text(day.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        entries.forEach { en -> PastEntryView(day, en) }
+                    }
+                }
+            }
+        }
+
         listOf(0, 1).forEach { block ->
             val slot = if (block == 0) slot0 else 1 - slot0
             val priority = ru.streetlift.tracker.domain.Priority.forMeso(if (block == 0) s.mesoIndex else nextMeso)
@@ -525,6 +637,63 @@ private fun ReminderSettings(s: SettingsEntity, onChange: (SettingsEntity) -> Un
  * [ahead] — во втором цикле для упражнения, которое есть и в первом: значения текущие,
  * разгрузка показывается, только если она придётся именно на следующий цикл.
  */
+private val pastDateFmt = java.time.format.DateTimeFormatter.ofPattern("EEEE, d MMMM", java.util.Locale.forLanguageTag("ru"))
+
+/** Выход на день прошлого цикла: дата, сделан/пропущен и план упражнений, с каким выходил. */
+@Composable
+private fun PastEntryView(day: DayEntity, en: PastEntry) {
+    HorizontalDivider()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            when {
+                en.at == null && en.restoredFromNext == true -> "пропущен · план по следующему выполнению дня"
+                en.at == null -> "пропущен · действующий план"
+                else -> (if (en.skipped) "пропущен: " else "сделан: ") +
+                    java.time.Instant.ofEpochMilli(en.at).atZone(java.time.ZoneId.systemDefault()).format(pastDateFmt)
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        if (en.skipped) Tag("Пропущен", MaterialTheme.colorScheme.outline)
+    }
+    val list = en.exercises
+    if (list == null) {
+        Text("план не сохранился", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        return
+    }
+    ru.streetlift.tracker.domain.ProgramOrder.order(day.position, list.filter { it.activeInSlot(en.slot) }, en.priority).forEach { e ->
+        PastExerciseRow(e, en)
+    }
+}
+
+/** Упражнение по плану прошлой тренировки (только просмотр). */
+@Composable
+private fun PastExerciseRow(e: ExerciseEntity, en: PastEntry) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(e.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+            if (e.mode == ExerciseMode.CALIBRATION) Tag("Калибровка", MaterialTheme.colorScheme.secondary)
+            else if (en.isDeload || e.plannedDeload(en.deloadEvery, false)) Tag("Разгрузка", ru.streetlift.tracker.ui.theme.DeloadGreen)
+        }
+        Text(
+            "${Fmt.range(e.minSets, e.maxSets)} × ${Fmt.range(e.effMinReps, e.effMaxReps)}${if (e.isSeconds) " с" else ""} · " +
+                "${Fmt.rir(e.targetRirMin, e.targetRirMax)} · шаг ${Fmt.step(e.weightStep)} кг",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        e.leverageStage?.let { Text("Стадия: $it", style = MaterialTheme.typography.bodySmall) }
+        if (e.mode != ExerciseMode.CALIBRATION) {
+            Text(
+                if (e.isJump) "План: ${e.jumpState?.let { ru.streetlift.tracker.domain.Jumps.describe(it) } ?: "высота не задана"}"
+                else "План: ${Fmt.weight(e.weightKg)}, ${e.plannedSets} подх., цель ${e.targetReps}+${if (e.isSeconds) " с" else ""}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
 @Composable
 private fun ExerciseRow(e: ExerciseEntity, s: SettingsEntity, block: Int, ahead: Boolean, onClick: () -> Unit) {
     // «Разгрузка на этот цикл» действует только на текущий цикл

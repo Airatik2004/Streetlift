@@ -190,6 +190,25 @@ interface SessionDao {
 
     @Query("DELETE FROM set_logs")
     suspend fun clearSets()
+
+    // Пропущенные дни
+    @Insert
+    suspend fun insertSkip(skip: SkipEntity): Long
+
+    @Insert
+    suspend fun insertSkips(skips: List<SkipEntity>)
+
+    @Query("SELECT * FROM skipped_days ORDER BY skippedAt DESC")
+    fun observeSkips(): Flow<List<SkipEntity>>
+
+    @Query("SELECT * FROM skipped_days ORDER BY skippedAt")
+    suspend fun getSkips(): List<SkipEntity>
+
+    @Query("DELETE FROM skipped_days WHERE skippedAt > :after")
+    suspend fun deleteSkipsAfter(after: Long)
+
+    @Query("DELETE FROM skipped_days")
+    suspend fun clearSkips()
 }
 
 @Dao

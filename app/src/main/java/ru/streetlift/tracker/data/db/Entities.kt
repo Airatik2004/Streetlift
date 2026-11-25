@@ -430,6 +430,30 @@ data class SetLogEntity(
     val heightCm: Int? = null,
 )
 
+/**
+ * Пропущенный день цикла (кнопка «Пропустить», v30). Хранится отдельно от тренировок,
+ * чтобы не попадать в статистику, рекорды и расчёты пика.
+ */
+@Serializable
+@Entity(tableName = "skipped_days")
+data class SkipEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val dayId: Long?,
+    val dayName: String,
+    val skippedAt: Long,
+    /** Номер цикла (как roundNumber у тренировок). */
+    val roundNumber: Int,
+    val cycleInMeso: Int? = null,
+    /** Приоритет мезоцикла (Priority.name). */
+    val priority: String? = null,
+    /** Общая разгрузка на этом цикле. */
+    val isDeload: Boolean = false,
+    /** День 1: что выпадало «через цикл» — 0 пистолетики, 1 прыжки. */
+    val altSlot: Int? = null,
+    /** JSON-снимок (RollbackData): с каким планом выходил на этот день. */
+    val plan: String? = null,
+)
+
 /** Справочник стадий рычага: 7 встроенных + свои варианты пользователя. */
 @Serializable
 @Entity(tableName = "leverage_stages", indices = [Index(value = ["name"], unique = true)])

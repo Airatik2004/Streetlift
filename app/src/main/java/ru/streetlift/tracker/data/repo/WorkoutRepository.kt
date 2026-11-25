@@ -58,6 +58,7 @@ class WorkoutRepository(private val db: AppDatabase) {
     /** Последнее сделанное из пары пистолетики / прыжки — от него зависит, что будет в Дне 1. */
     val lastAlt: Flow<ru.streetlift.tracker.data.db.LastAlt?> = sessionDao.observeLastAlt()
     val allSets: Flow<List<SetLogEntity>> = sessionDao.observeAllSets()
+    val skips: Flow<List<ru.streetlift.tracker.data.db.SkipEntity>> = sessionDao.observeSkips()
     val stages: Flow<List<StageEntity>> = programDao.observeStages()
     val stageArchive: Flow<List<StageArchiveEntity>> = programDao.observeArchive()
 
@@ -563,6 +564,8 @@ class WorkoutRepository(private val db: AppDatabase) {
                 programDao.updateExercises(restored)
                 syncShared(restored)
             }
+            // Цикл вернулся к состоянию до тренировки — пропуски после неё уже не действуют
+            sessionDao.deleteSkipsAfter(session.startedAt)
             rolledBack = true
         }
         sessionDao.deleteSession(sessionId)
@@ -709,6 +712,24 @@ class WorkoutRepository(private val db: AppDatabase) {
         )
         // Пропускается показанный день (на пике он может быть выбран не по порядку)
         val shown = plannedDayIndex(s0, days, programDao.getAllExercises(), sessionDao.getAllSessions(), today())
+        // Запись пропуска со снимком плана дня — для «Предыдущего цикла» и истории
+        days.getOrNull(shown)?.let { day ->
+            val round = s0.completedRounds + 1
+            val last = sessionDao.getLastAlt()
+            sessionDao.insertSkip(
+                ru.streetlift.tracker.data.db.SkipEntity(
+                    dayId = day.id,
+                    dayName = day.name,
+                    skippedAt = System.currentTimeMillis(),
+                    roundNumber = round,
+                    cycleInMeso = s0.cycleInMeso,
+                    priority = s0.priority.name,
+                    isDeload = ProgressionEngine.isGlobalDeload(s0.cycleInMeso, s0.deloadEvery, s0.deloadOverride),
+                    altSlot = if (last != null && last.roundNumber == round) last.slot else ru.streetlift.tracker.data.db.nextAltSlot(last),
+                    plan = runCatching { BackupJson.encodeRollback(RollbackData(s0, programDao.getExercisesForDay(day.id))) }.getOrNull(),
+                ),
+            )
+        }
         val adv = ProgressionEngine.advanceCycle(
             CycleState(s.currentDayIndex, s.cycleInMeso, s.completedRounds, s.deloadOverride),
             shown, days.size, s.deloadEvery,
@@ -730,6 +751,9 @@ class WorkoutRepository(private val db: AppDatabase) {
     suspend fun undoSkip() {
         val s = getSettings()
         if (!s.canUndoSkip) return
+        // Записи этих пропусков (после последней тренировки) — тоже убрать
+        val lastDone = sessionDao.getAllSessions().mapNotNull { it.finishedAt }.maxOrNull() ?: 0L
+        sessionDao.deleteSkipsAfter(lastDone)
         settingsDao.upsert(
             s.withoutUndo().copy(
                 manualDay = false,
@@ -939,6 +963,7 @@ class WorkoutRepository(private val db: AppDatabase) {
                 stageArchive = programDao.getArchive(),
                 manualRecords = statsDao.getManual(),
                 runs = statsDao.getRuns(),
+                skips = sessionDao.getSkips(),
             )
         }
         return BackupJson.encode(data)
@@ -954,6 +979,7 @@ class WorkoutRepository(private val db: AppDatabase) {
         db.withTransaction {
             sessionDao.clearSets()
             sessionDao.clearSessions()
+            sessionDao.clearSkips()
             programDao.clearExercises()
             programDao.clearDays()
             programDao.clearStages()
@@ -996,6 +1022,12 @@ class WorkoutRepository(private val db: AppDatabase) {
                 data.sets.map { st ->
                     val name = DefaultTemplate.renamed[st.exerciseName] ?: st.exerciseName
                     st.copy(exerciseId = newIdByName[name], exerciseName = name)
+                },
+            )
+            sessionDao.insertSkips(
+                data.skips.map { sk ->
+                    val dn = DefaultTemplate.renamedDays[sk.dayName] ?: sk.dayName
+                    sk.copy(id = 0, dayName = dn, dayId = dayIdByName[dn])
                 },
             )
             programDao.insertArchives(data.stageArchive)

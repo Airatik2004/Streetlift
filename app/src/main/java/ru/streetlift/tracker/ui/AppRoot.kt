@@ -117,7 +117,7 @@ fun AppRoot(repo: WorkoutRepository) {
                 ) { page ->
                     when (page) {
                         0 -> HomeScreen(repo, onOpenWorkout = { id -> nav.navigate("workout/$id") })
-                        1 -> EditorScreen(repo)
+                        1 -> EditorScreen(repo, away = pager.settledPage != 1)
                         2 -> TimerScreen()
                         else -> ru.streetlift.tracker.ui.stats.StatsScreen(repo)
                     }

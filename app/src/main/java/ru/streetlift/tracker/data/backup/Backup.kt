@@ -25,6 +25,7 @@ data class BackupData(
     val stageArchive: List<StageArchiveEntity> = emptyList(),
     val manualRecords: List<ru.streetlift.tracker.data.db.ManualRecordEntity> = emptyList(),
     val runs: List<ru.streetlift.tracker.data.db.RunEntity> = emptyList(),
+    val skips: List<ru.streetlift.tracker.data.db.SkipEntity> = emptyList(),
 )
 
 /** Состояние до завершения тренировки. */

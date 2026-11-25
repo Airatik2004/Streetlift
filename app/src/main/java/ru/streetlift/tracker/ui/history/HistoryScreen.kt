@@ -72,6 +72,12 @@ import java.time.LocalDate
 
 data class HistoryItem(val session: SessionEntity, val byExercise: List<Pair<String, List<SetLogEntity>>>)
 
+/** Строка истории: тренировка или пропущенный день. */
+data class HistoryRow(val item: HistoryItem? = null, val skip: ru.streetlift.tracker.data.db.SkipEntity? = null) {
+    val at: Long get() = item?.session?.startedAt ?: skip?.skippedAt ?: 0L
+    val key: String get() = item?.let { "s${it.session.id}" } ?: "k${skip?.id}"
+}
+
 class HistoryViewModel(private val repo: WorkoutRepository) : ViewModel() {
 
     val items: StateFlow<List<HistoryItem>> = combine(repo.finishedSessions, repo.allSets) { sessions, sets ->
@@ -87,6 +93,9 @@ class HistoryViewModel(private val repo: WorkoutRepository) : ViewModel() {
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val skips: StateFlow<List<ru.streetlift.tracker.data.db.SkipEntity>> =
+        repo.skips.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val archive: StateFlow<List<StageArchiveEntity>> =
         repo.stageArchive.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -130,6 +139,11 @@ class HistoryViewModel(private val repo: WorkoutRepository) : ViewModel() {
 fun HistoryScreen(repo: WorkoutRepository, focusSessionId: Long? = null, onFocused: () -> Unit = {}) {
     val vm: HistoryViewModel = viewModel(factory = viewModelFactory { initializer { HistoryViewModel(repo) } })
     val history by vm.items.collectAsStateWithLifecycle()
+    val skips by vm.skips.collectAsStateWithLifecycle()
+    // Тренировки и пропуски — вместе, по дате
+    val rows = remember(history, skips) {
+        (history.map { HistoryRow(item = it) } + skips.map { HistoryRow(skip = it) }).sortedByDescending { it.at }
+    }
     val archive by vm.archive.collectAsStateWithLifecycle()
     val rollbackableId by vm.rollbackableId.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
@@ -141,9 +155,9 @@ fun HistoryScreen(repo: WorkoutRepository, focusSessionId: Long? = null, onFocus
     var expanded by remember { mutableStateOf(setOf<Long>()) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     // Переход из графика: раскрыть и прокрутить к нужной тренировке
-    androidx.compose.runtime.LaunchedEffect(focusSessionId, history) {
+    androidx.compose.runtime.LaunchedEffect(focusSessionId, rows) {
         val id = focusSessionId ?: return@LaunchedEffect
-        val pos = history.indexOfFirst { it.session.id == id }
+        val pos = rows.indexOfFirst { it.item?.session?.id == id }
         if (pos < 0) return@LaunchedEffect
         expanded = expanded + id
         val before = 1 + (if (archive.isNotEmpty()) 1 else 0)
@@ -218,7 +232,7 @@ fun HistoryScreen(repo: WorkoutRepository, focusSessionId: Long? = null, onFocus
             }
         }
 
-        if (history.isEmpty()) {
+        if (rows.isEmpty()) {
             item {
                 Text(
                     "Пока нет завершённых тренировок.",
@@ -228,62 +242,68 @@ fun HistoryScreen(repo: WorkoutRepository, focusSessionId: Long? = null, onFocus
             }
         }
 
-        items(history, key = { it.session.id }) { entry ->
-            val s = entry.session
-            val isOpen = s.id in expanded
-            Card(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = if (isOpen) expanded - s.id else expanded + s.id },
-            ) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(s.dayName, style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                "${formatDateTime(s.startedAt)}" +
-                                    (s.priority?.let { p -> runCatching { ru.streetlift.tracker.domain.Priority.valueOf(p) }.getOrNull() }?.let { " · ${it.title.lowercase()}" } ?: "") +
-                                    " · цикл ${s.shownCycle} из 5",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+        items(rows, key = { it.key }) { row ->
+            val sk = row.skip
+            if (sk != null) {
+                SkipCard(sk)
+            } else {
+                val entry = row.item!!
+                val s = entry.session
+                val isOpen = s.id in expanded
+                Card(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { expanded = if (isOpen) expanded - s.id else expanded + s.id },
+                ) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(s.dayName, style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    "${formatDateTime(s.startedAt)}" +
+                                        (s.priority?.let { p -> runCatching { ru.streetlift.tracker.domain.Priority.valueOf(p) }.getOrNull() }?.let { " · ${it.title.lowercase()}" } ?: "") +
+                                        " · цикл ${s.shownCycle} из 5",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            if (s.isDeload) Tag("Разгрузка", DeloadGreen)
+                            IconButton(onClick = { toDelete = s }) {
+                                Icon(Icons.Filled.Delete, contentDescription = "Удалить", modifier = Modifier.size(20.dp))
+                            }
                         }
-                        if (s.isDeload) Tag("Разгрузка", DeloadGreen)
-                        IconButton(onClick = { toDelete = s }) {
-                            Icon(Icons.Filled.Delete, contentDescription = "Удалить", modifier = Modifier.size(20.dp))
-                        }
-                    }
-                    entry.byExercise.forEach { (name, logs) ->
-                        Text(name, style = MaterialTheme.typography.bodyMedium)
-                        // Долгое нажатие на подход — изменить
-                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            logs.forEach { log ->
-                                Surface(
-                                    color = MaterialTheme.colorScheme.surfaceVariant,
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.combinedClickable(onClick = {}, onLongClick = { editSet = log }),
-                                ) {
-                                    Text(
-                                        (when (log.side) { "L" -> "Л "; "R" -> "П "; else -> "" }) +
-                                            (if (log.heightCm != null) "${log.heightCm} см · ${Fmt.weightValue(log.weightKg)}×${log.reps}"
-                                            else "${Fmt.weightValue(log.weightKg)}×${log.reps}${if (log.isSeconds) "с" else ""} · ${Fmt.rirValue(log.rir)}"),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    )
+                        entry.byExercise.forEach { (name, logs) ->
+                            Text(name, style = MaterialTheme.typography.bodyMedium)
+                            // Долгое нажатие на подход — изменить
+                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                logs.forEach { log ->
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.combinedClickable(onClick = {}, onLongClick = { editSet = log }),
+                                    ) {
+                                        Text(
+                                            (when (log.side) { "L" -> "Л "; "R" -> "П "; else -> "" }) +
+                                                (if (log.heightCm != null) "${log.heightCm} см · ${Fmt.weightValue(log.weightKg)}×${log.reps}"
+                                                else "${Fmt.weightValue(log.weightKg)}×${log.reps}${if (log.isSeconds) "с" else ""} · ${Fmt.rirValue(log.rir)}"),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        )
+                                    }
                                 }
                             }
                         }
-                    }
-                    if (isOpen && s.summary.isNotBlank()) {
-                        HorizontalDivider()
-                        Text("Решения движка:", style = MaterialTheme.typography.labelLarge)
-                        Text(s.summary, style = MaterialTheme.typography.bodySmall)
-                    } else if (s.summary.isNotBlank()) {
-                        Text(
-                            "Нажмите, чтобы увидеть пересчёт плана",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
+                        if (isOpen && s.summary.isNotBlank()) {
+                            HorizontalDivider()
+                            Text("Решения движка:", style = MaterialTheme.typography.labelLarge)
+                            Text(s.summary, style = MaterialTheme.typography.bodySmall)
+                        } else if (s.summary.isNotBlank()) {
+                            Text(
+                                "Нажмите, чтобы увидеть пересчёт плана",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                     }
                 }
             }
@@ -331,5 +351,23 @@ fun HistoryScreen(repo: WorkoutRepository, focusSessionId: Long? = null, onFocus
                 toDelete = null
             },
         )
+    }
+}
+
+/** Пропущенный день в истории. */
+@Composable
+private fun SkipCard(k: ru.streetlift.tracker.data.db.SkipEntity) {
+    Card(Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(k.dayName, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    formatDateTime(k.skippedAt) + (k.cycleInMeso?.let { " · цикл $it из 5" } ?: ""),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Tag("Пропущен", MaterialTheme.colorScheme.outline)
+        }
     }
 }

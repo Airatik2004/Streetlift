@@ -533,7 +533,10 @@ private fun WorkPanel(
     }
     Spacer(Modifier.height(6.dp))
     if (cur.exercise.isSeconds) {
-        HoldStopwatch(onResult = onReps)
+        // Обычный подход — сигнал на цели плана; калибровка — на границах коридора
+        val marks = if (cur.plan.isCalibration) listOf(cur.plan.repsMin, cur.plan.repsMax).distinct()
+        else listOf(cur.plan.targetReps)
+        HoldStopwatch(marks = marks, cap = marks.maxOrNull(), onResult = onReps)
         Spacer(Modifier.height(6.dp))
     }
     Stepper(
@@ -568,10 +571,11 @@ private fun WorkPanel(
 
 /**
  * Секундомер подхода для статики: задержка старта и пики — из настроек секундомера вкладки «Таймер».
- * «Стоп» подставляет секунды в результат; экран не гаснет, пока идёт удержание.
+ * На отметках [marks] — длинный сигнал с вибрацией. «Стоп» подставляет секунды в результат;
+ * после сигнала [cap] — ровно цель (время на подход к телефону не считается). Экран не гаснет.
  */
 @Composable
-private fun HoldStopwatch(onResult: (Int) -> Unit) {
+private fun HoldStopwatch(marks: List<Int>, cap: Int?, onResult: (Int) -> Unit) {
     val ctx = LocalContext.current
     val sw by ru.streetlift.tracker.timer.Stopwatch.state.collectAsStateWithLifecycle()
     val mine = sw.owner == "hold"
@@ -591,12 +595,12 @@ private fun HoldStopwatch(onResult: (Int) -> Unit) {
                 Button(onClick = {
                     val secs = ru.streetlift.tracker.timer.Stopwatch.stop()
                     ru.streetlift.tracker.timer.Stopwatch.reset()
-                    onResult(secs)
+                    onResult(ru.streetlift.tracker.timer.holdResult(secs, cap))
                 }) { Text("Стоп") }
             } else {
                 Button(onClick = {
                     ru.streetlift.tracker.timer.Stopwatch.reset()
-                    ru.streetlift.tracker.timer.Stopwatch.start(ctx, owner = "hold")
+                    ru.streetlift.tracker.timer.Stopwatch.start(ctx, owner = "hold", marks = marks)
                 }) { Text("Старт") }
             }
         }

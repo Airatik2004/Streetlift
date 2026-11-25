@@ -3,7 +3,8 @@ package ru.streetlift.tracker.domain
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import ru.streetlift.tracker.workout.nextNeedsScreen
+import org.junit.Assert.assertEquals
+import ru.streetlift.tracker.timer.holdResult
 
 class NoBandsTest {
     @Test
@@ -23,9 +24,12 @@ class NoBandsTest {
     }
 
     @Test
-    fun notificationNext() {
-        assertTrue(nextNeedsScreen(isWarmup = false, isCalibration = true))
-        assertFalse(nextNeedsScreen(isWarmup = true, isCalibration = true))
-        assertFalse(nextNeedsScreen(isWarmup = false, isCalibration = false))
+    fun holdResult_capsAtTarget() {
+        // «Стоп» после сигнала цели — пишется цель, время на подход к телефону не считается
+        assertEquals(12, holdResult(17, 12))
+        assertEquals(12, holdResult(12, 12))
+        // Сорвался раньше — пишется как есть
+        assertEquals(9, holdResult(9, 12))
+        assertEquals(20, holdResult(20, null))
     }
 }

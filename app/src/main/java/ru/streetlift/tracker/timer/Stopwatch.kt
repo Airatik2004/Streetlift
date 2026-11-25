@@ -27,6 +27,8 @@ object Stopwatch {
         val laps: List<Long> = emptyList(),
         /** Кто запустил: «» — вкладка «Таймер», «hold» — статика на тренировке. */
         val owner: String = "",
+        /** Отметки (с), на которых звучит длинный сигнал с вибрацией: цель удержания, границы коридора. */
+        val marks: List<Int> = emptyList(),
     ) {
         val active: Boolean get() = running || countdown > 0
         val idle: Boolean get() = !active && elapsedMs == 0L
@@ -41,13 +43,16 @@ object Stopwatch {
     private var startedAt = 0L
     private var baseMs = 0L
     private var beepEvery = 5
+    private var appCtx: Context? = null
 
     private fun now() = SystemClock.elapsedRealtime()
 
     /** Старт (или продолжение после паузы). Задержка — только для старта с нуля. */
-    fun start(context: Context, owner: String = _state.value.owner) {
+    fun start(context: Context, owner: String = _state.value.owner, marks: List<Int> = _state.value.marks) {
         val s = _state.value
         if (s.active) return
+        appCtx = context.applicationContext
+        _state.value = s.copy(marks = marks)
         val prefs = TimerPrefs.load(context)
         beepEvery = prefs.stopwatchBeepEvery
         val delaySec = if (s.elapsedMs == 0L) prefs.stopwatchDelay else 0
@@ -87,7 +92,13 @@ object Stopwatch {
                 val el = baseMs + (now() - startedAt)
                 _state.value = _state.value.copy(elapsedMs = el)
                 val sec = (el / 1000).toInt()
-                if (beepEvery > 0 && sec != lastBeep && sec > 0 && sec % beepEvery == 0) Beeper.pip()
+                if (sec != lastBeep && sec > 0) {
+                    val marks = _state.value.marks
+                    when {
+                        sec in marks -> appCtx?.let { SignalPlayer.signal(it) }
+                        beepEvery > 0 && sec % beepEvery == 0 -> Beeper.pip()
+                    }
+                }
                 lastBeep = sec
                 delay(50)
             }

@@ -59,6 +59,12 @@ data class WarmupStep(val block: ExerciseBlock, val index: Int, val total: Int, 
 data class Draft(val weight: Float, val reps: Int, val rir: Int, val stage: String?, val height: Int? = null)
 
 /** Полное вычисленное состояние тренировки на текущий момент. */
+/**
+ * «Следующий» из уведомления требует экран (ввод веса): только рабочий подход калибровки.
+ * Разминка и обычные подходы отмечаются прямо из уведомления, по плану.
+ */
+fun nextNeedsScreen(isWarmup: Boolean, isCalibration: Boolean): Boolean = !isWarmup && isCalibration
+
 data class PlanResult(
     val session: SessionEntity,
     val blocks: List<ExerciseBlock>,

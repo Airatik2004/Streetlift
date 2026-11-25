@@ -273,9 +273,10 @@ class TimerService : Service() {
             // Тренировка: ⏮ Предыдущий · ⏯ Пауза · ⏭ Следующий — как на экране
             b.addAction(0, "Предыдущий", actionIntent(ACTION_PREV, 4))
             b.addAction(0, if (workStep || st.running) "Пауза" else "Продолжить", actionIntent(ACTION_TOGGLE, 1))
-            // Калибровка — открыть экран ввода (вес подбирается); обычный подход — записать по плану;
+            // Рабочий подход калибровки — открыть экран ввода (вес подбирается); разминка и обычный подход — по плану;
             // отдых — закончить досрочно
-            val calibrating = workStep && r.current?.plan?.isCalibration == true
+            val calibrating = workStep &&
+                ru.streetlift.tracker.workout.nextNeedsScreen(r.warmup != null, r.current?.plan?.isCalibration == true)
             b.addAction(0, "Следующий", if (calibrating) openWorkoutIntent(r.session.id) else actionIntent(ACTION_NEXT, 5))
         } else if (!st.finished) {
             b.addAction(0, if (st.running) "Пауза" else "Старт", actionIntent(ACTION_TOGGLE, 1))

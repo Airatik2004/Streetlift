@@ -300,8 +300,9 @@ data class ExerciseEntity(
     /** Не участвует в суперсете — идёт в конце дня (статика и «всегда последние»). */
     val outOfSuperset: Boolean get() = isSeconds || alwaysLast
 
-    /** Резина для помощи: нельзя в стойке (облегчение стадиями) и в задней дельте (гантели). */
-    val allowBands: Boolean get() = stageGroup != ru.streetlift.tracker.domain.StageGroups.HANDSTAND && shareKey == null && !isJump
+    /** Резина для помощи: нельзя в стойке (облегчение стадиями), в задней дельте (гантели), в прыжках и в горизонте. */
+    val allowBands: Boolean get() = stageGroup != ru.streetlift.tracker.domain.StageGroups.HANDSTAND && shareKey == null && !isJump &&
+        !ru.streetlift.tracker.domain.StageGroups.noBandsByName(name)
 
     /** Шкала нагрузки: резины текущего набора → свой вес → +шаг. */
     val loadScale: ru.streetlift.tracker.domain.LoadScale

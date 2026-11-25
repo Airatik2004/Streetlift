@@ -93,6 +93,12 @@ object StageGroups {
     /** Финальная стадия группы (Фулл / Свободная ноги вместе). */
     fun finalOf(group: String): String? = lists[group]?.lastOrNull()?.name
 
+    /**
+     * Резина недопустима: горизонт (отжимания и удержание) — резина крепится к опоре внизу,
+     * и её помощь зависит от высоты опоры, прогресс на разных турниках несравним.
+     */
+    fun noBandsByName(name: String): Boolean = "горизонт" in name.lowercase()
+
     /** Группа по названию упражнения — для старых данных и импорта. */
     fun groupForName(name: String): String? {
         val n = name.lowercase()

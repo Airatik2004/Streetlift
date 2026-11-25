@@ -68,7 +68,8 @@ android {
     }
     // Схемы базы — ассеты тестов: тест миграций создаёт базу прошлой версии и обновляет её
     sourceSets {
-        getByName("test").assets.srcDir("$projectDir/schemas")
+        // Robolectric берёт ассеты отладочной сборки (в release схем нет)
+        getByName("debug").assets.srcDir("$projectDir/schemas")
     }
     testOptions {
         unitTests.isIncludeAndroidResources = true

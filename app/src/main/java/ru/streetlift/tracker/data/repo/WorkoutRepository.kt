@@ -50,6 +50,8 @@ class WorkoutRepository(private val db: AppDatabase) {
     val activeSession: Flow<SessionEntity?> = sessionDao.observeActive()
     val lastFinishedSession: Flow<SessionEntity?> = sessionDao.observeLastFinished()
     val finishedSessions: Flow<List<SessionEntity>> = sessionDao.observeFinished()
+    suspend fun countSetsAtStage(name: String, stage: String): Int = sessionDao.countSetsAtStage(name, stage)
+
     /** Последнее сделанное из пары пистолетики / прыжки — от него зависит, что будет в Дне 1. */
     val lastAlt: Flow<ru.streetlift.tracker.data.db.LastAlt?> = sessionDao.observeLastAlt()
     val allSets: Flow<List<SetLogEntity>> = sessionDao.observeAllSets()

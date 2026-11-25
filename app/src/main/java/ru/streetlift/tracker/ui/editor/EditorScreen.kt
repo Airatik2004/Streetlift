@@ -69,6 +69,15 @@ data class EditorUi(
 )
 
 class EditorViewModel(private val repo: WorkoutRepository) : ViewModel() {
+    /** Есть ли подходы на текущей стадии упражнения — от этого зависит текст про архив. */
+    @Composable
+    fun hasStageHistory(e: ExerciseEntity): Boolean {
+        val v by androidx.compose.runtime.produceState(true, e.id, e.leverageStage) {
+            value = e.leverageStage?.let { repo.countSetsAtStage(e.name, it) > 0 } ?: false
+        }
+        return v
+    }
+
     val state: StateFlow<EditorUi> = combine(repo.settings, repo.days, repo.exercises, repo.stages, repo.lastAlt) { s, d, e, st, la ->
         EditorUi(s, d, e.groupBy { it.dayId }.mapValues { (_, v) -> v.sortedBy { it.position } }, st, la)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EditorUi())
@@ -104,14 +113,7 @@ fun EditorScreen(repo: WorkoutRepository) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Column {
-                Text("Цикл", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text(
-                    "Программа задана заранее. Нажмите на упражнение, чтобы изменить вес, стадию или запустить калибровку.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text("Цикл", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         }
 
         // Два цикла подряд: текущий и следующий. В Дне 1 — то, что там реально будет
@@ -260,6 +262,7 @@ fun EditorScreen(repo: WorkoutRepository) {
             exercise = e,
             stages = ui.stages.filter { it.groupKey == e.stageGroup },
             deloadEvery = s.deloadEvery,
+            hasStageHistory = vm.hasStageHistory(e),
             onDismiss = { editExercise = null },
             onSave = {
                 vm.saveExercise(it)
@@ -275,6 +278,8 @@ private fun CalibrationDialog(
     exercise: ExerciseEntity,
     stages: List<StageEntity>,
     deloadEvery: Int,
+    /** Есть подходы на текущей стадии (иначе про архив не пишем). */
+    hasStageHistory: Boolean,
     onDismiss: () -> Unit,
     onSave: (ExerciseEntity) -> Unit,
 ) {
@@ -313,7 +318,12 @@ private fun CalibrationDialog(
                     )
                     if (stageChanged) {
                         Text(
-                            "История «${exercise.leverageStage}» уйдёт в архив, упражнение на 1 цикл перейдёт в калибровку.",
+                            when {
+                                // Уже на калибровке — она просто пройдёт на новой стадии
+                                exercise.mode == ExerciseMode.CALIBRATION || calibrate -> "Калибровка пройдёт на новой стадии."
+                                !hasStageHistory -> "Упражнение на 1 цикл перейдёт в калибровку."
+                                else -> "История «${exercise.leverageStage}» уйдёт в архив, упражнение на 1 цикл перейдёт в калибровку."
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                         )

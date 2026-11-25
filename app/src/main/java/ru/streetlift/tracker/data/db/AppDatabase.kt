@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ManualRecordEntity::class,
         RunEntity::class,
     ],
-    version = 22,
+    version = 23,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -29,6 +29,20 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun statsDao(): StatsDao
 
     companion object {
+        /** v23: описания стадий «Ноги врозь» — по углу, а не «под острым». */
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "UPDATE stages SET description = ? WHERE builtIn = 1 AND name = ?",
+                    arrayOf("Прямые ноги разведены широко, больше 60°", "Ноги врозь (широкие, >60°)"),
+                )
+                db.execSQL(
+                    "UPDATE stages SET description = ? WHERE builtIn = 1 AND name = ?",
+                    arrayOf("Прямые ноги разведены немного, около 30°", "Ноги врозь (узкие, ~30°)"),
+                )
+            }
+        }
+
         /** v22: «День 2 · Горизонт + 1 рука» → «День 2 · Горизонт + П1Р» (программа и история). */
         val MIGRATION_21_22 = object : Migration(21, 22) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -210,7 +224,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "streetlift.db")
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23)
                 // Самая первая сборка (v1) не сохраняется — пересоздаётся
                 .fallbackToDestructiveMigration()
                 .build()

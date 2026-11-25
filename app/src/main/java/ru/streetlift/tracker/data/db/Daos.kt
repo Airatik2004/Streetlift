@@ -138,6 +138,9 @@ interface SessionDao {
     @Query("SELECT * FROM sessions ORDER BY startedAt")
     suspend fun getAllSessions(): List<SessionEntity>
 
+    @Query("SELECT COUNT(*) FROM set_logs WHERE exerciseName = :name AND leverageStage = :stage")
+    suspend fun countSetsAtStage(name: String, stage: String): Int
+
     /** Последнее сделанное из пары «через цикл» (пистолетики / прыжки) в завершённых тренировках. */
     @Query(
         "SELECT l.exerciseName AS exerciseName, s.roundNumber AS roundNumber FROM set_logs l " +

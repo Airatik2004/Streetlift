@@ -95,11 +95,24 @@ object ActiveWorkout {
             val bodyWeight = st.bodyWeightKg
             val phase = session.peakPhase?.let { runCatching { PeakPhase.valueOf(it) }.getOrNull() } ?: PeakPhase.NONE
             val peakIds = session.peakIds?.split(',')?.mapNotNull { it.trim().toLongOrNull() }?.toSet().orEmpty()
-            val plans = all.mapNotNull { e ->
-                Peaking.resolve(
+            // Пауэр: движения штанги первыми (их в программе нет), основная программа — в поддержке,
+            // в снижении и тонусе полностью исключается
+            val power = st.power != null && phase != PeakPhase.NONE
+            val powerItems = if (power) {
+                val lifts = peakIds.mapNotNull { ru.streetlift.tracker.domain.Power.Lift.byId(it) }
+                repo.powerPlans(phase, lifts, exclude = sessionId)
+            } else emptyList()
+            val powerEx = powerItems.mapIndexed { i, p -> ru.streetlift.tracker.data.db.powerExercise(p.lift, session.dayId ?: 0L, -10 + i) }
+            val plans = (powerEx + all).mapNotNull { e ->
+                val item = powerItems.firstOrNull { it.lift.id == e.id }
+                (item?.plan ?: if (power) {
+                    if (phase != PeakPhase.PRE_PEAK) null
+                    else Peaking.resolve(e.toConfig(), e.toState(), e.type, e.plannedDeload(st.deloadEvery, session.isDeload), PeakPhase.NONE, false, bodyWeight)
+                        ?.let { if (e.isJump) it else ru.streetlift.tracker.domain.RunPlan.support(it) }
+                } else Peaking.resolve(
                     e.toConfig(), e.toState(), e.type, phase == PeakPhase.NONE && e.plannedDeload(st.deloadEvery, session.isDeload), phase, e.id in peakIds, bodyWeight,
                     comp = st.compTarget(e.id, e.name),
-                )
+                ))
                     // Подготовка к забегу: силовые в поддержке
                     ?.let { if (st.endurance && !e.isJump) ru.streetlift.tracker.domain.RunPlan.support(it) else it }
                     // Самочувствие: средне — меньше объём (у прыжков объём не режем), плохо — как разгрузка
@@ -109,14 +122,16 @@ object ActiveWorkout {
                     ?.let { if (e.isJump) ru.streetlift.tracker.domain.jumpPlan(e.jumpState, it) else it }
                     ?.let { e.id to it }
             }.toMap()
-            val exercises = all.filter { it.id in plans }
+            val exercises = (powerEx + all).filter { it.id in plans }
             // Односторонние: на всю тренировку начинаем со слабой стороны прошлой тренировки (поровну — с левой)
             val firstSides = exercises.filter { it.unilateral }.associate { it.id to repo.weakSide(it.name, sessionId) }
             val own = owner(sessionId)
             TimerService.ensureRunning(app)
             // Разминка тем же движением перед первым подходом каждого упражнения
             val warmups = exercises.associate { e ->
-                e.id to ru.streetlift.tracker.domain.Warmup.sets(e.type, e.isSeconds, e.isJump, plans.getValue(e.id), e.loadScale)
+                val lift = ru.streetlift.tracker.domain.Power.Lift.byId(e.id)
+                e.id to if (lift != null) ru.streetlift.tracker.domain.Power.warmup(lift, plans.getValue(e.id))
+                else ru.streetlift.tracker.domain.Warmup.sets(e.type, e.isSeconds, e.isJump, plans.getValue(e.id), e.loadScale)
             }
             warmupLists = warmups
             combine(repo.observeSets(sessionId), extra, prefill, RestTimer.state, warmupDone) { logs, ex, pf, timer, wd ->

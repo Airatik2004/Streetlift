@@ -48,6 +48,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import ru.streetlift.tracker.data.db.DayEntity
@@ -60,6 +61,7 @@ import ru.streetlift.tracker.domain.Competition
 import ru.streetlift.tracker.domain.Discipline
 import ru.streetlift.tracker.domain.Fmt
 import ru.streetlift.tracker.domain.PeakPhase
+import ru.streetlift.tracker.domain.Power
 import ru.streetlift.tracker.domain.Peaking
 import ru.streetlift.tracker.domain.ProgressionEngine
 import ru.streetlift.tracker.domain.RunPlan
@@ -75,7 +77,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /** plan == null — упражнение в этот день пропускается (подводка). */
-data class ExercisePreview(val exercise: ExerciseEntity, val plan: SessionPlan?)
+data class ExercisePreview(val exercise: ExerciseEntity, val plan: SessionPlan?, val powerLabel: String? = null)
 
 data class HomeUiState(
     val loading: Boolean = true,
@@ -102,13 +104,24 @@ data class HomeUiState(
 
 class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
 
+    /** Пауэр: движения следующей тренировки (их в программе нет — считаются по истории подготовки). */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val powerItems = combine(repo.settings, repo.finishedSessions) { s, _ -> s }
+        .mapLatest { s ->
+            if (s.power == null) emptyList() else {
+                val today = LocalDate.now().toEpochDay()
+                repo.powerPlans(Peaking.phaseOn(s.peakEpochDay, maxOf(today, s.nextWorkoutEpochDay ?: today), s.peakSpanDays))
+            }
+        }
+
     val state: StateFlow<HomeUiState> = combine(
         combine(repo.settings, repo.days, repo.exercises, repo.activeSession, repo.lastFinishedSession) { a, b, c, d, e ->
             listOf(a, b, c, d, e)
         },
         repo.finishedSessions,
         repo.lastAlt,
-    ) { base, finished, lastAlt ->
+        powerItems,
+    ) { base, finished, lastAlt, powerList ->
         @Suppress("UNCHECKED_CAST")
         val s = base[0] as SettingsEntity
         @Suppress("UNCHECKED_CAST")
@@ -127,10 +140,19 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
         val missed = s.missedDays(today)
         val afterPause = phase == PeakPhase.PRE_PEAK && missed >= Peaking.PAUSE_DAYS
         val peakIds = s.peakIds
-        val previews = if (day == null) emptyList() else ru.streetlift.tracker.domain.ProgramOrder.order(
+        val power = s.power != null && phase != PeakPhase.NONE
+        val powerPreviews = if (!power) emptyList() else powerList.mapIndexed { i, p ->
+            ExercisePreview(ru.streetlift.tracker.data.db.powerExercise(p.lift, day?.id ?: 0L, -10 + i), p.plan, p.label)
+        }
+        val previews = powerPreviews + if (day == null) emptyList() else ru.streetlift.tracker.domain.ProgramOrder.order(
             day.position, exs.filter { it.dayId == day.id && it.activeInSlot(ru.streetlift.tracker.data.db.nextAltSlot(lastAlt)) }.sortedBy { it.position }, s.priority,
         ) { phase != PeakPhase.NONE && it.id in peakIds }
-            .map { ExercisePreview(it, Peaking.resolve(it.toConfig(), it.toState(), it.type, phase == PeakPhase.NONE && it.plannedDeload(s.deloadEvery, global), phase, it.id in peakIds, s.bodyWeightKg, s.compTarget(it.id, it.name))
+            .map { ExercisePreview(it, (if (power) {
+                    // Пауэр: основная программа в поддержке, в снижении и тонусе — не делается
+                    if (phase != PeakPhase.PRE_PEAK) null
+                    else Peaking.resolve(it.toConfig(), it.toState(), it.type, it.plannedDeload(s.deloadEvery, false), PeakPhase.NONE, false, s.bodyWeightKg)
+                        ?.let { p -> if (it.isJump) p else ru.streetlift.tracker.domain.RunPlan.support(p) }
+                } else Peaking.resolve(it.toConfig(), it.toState(), it.type, phase == PeakPhase.NONE && it.plannedDeload(s.deloadEvery, global), phase, it.id in peakIds, s.bodyWeightKg, s.compTarget(it.id, it.name)))
                 ?.let { p -> if (s.endurance && !it.isJump) ru.streetlift.tracker.domain.RunPlan.support(p) else p }
                 ?.let { p -> if (afterPause) p.copy(sets = (p.sets - 1).coerceAtLeast(1)) else p }
                 ?.let { p -> if (it.isJump) ru.streetlift.tracker.domain.jumpPlan(it.jumpState, p) else p }) }
@@ -177,6 +199,9 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
     fun setDeload(want: Boolean) = viewModelScope.launch { repo.setDeload(want) }
     fun setPeak(epochDay: Long, ids: Set<Long>, bw: Float?) = viewModelScope.launch { repo.setPeak(epochDay, ids, bw) }
     fun clearPeak() = viewModelScope.launch { repo.clearPeak() }
+    fun setPowerPeak(epochDay: Long, kind: Power.Kind, refs: Map<Power.Lift, Power.Ref>, bw: Float?) =
+        viewModelScope.launch { repo.setPowerPeak(epochDay, kind, refs, bw) }
+    suspend fun powerEstimate(kind: Power.Kind, refs: Map<Power.Lift, Power.Ref>, target: Long?) = repo.powerEstimate(kind, refs, target)
     fun setCompetitionPeak(epochDay: Long, disc: String, bw: Float?, birth: Long?) =
         viewModelScope.launch { repo.setCompetitionPeak(epochDay, disc, bw, birth) }
     suspend fun estimate(d: Discipline, bw: Float?): Competition.Estimate? = repo.competitionEstimate(d, bw)
@@ -290,6 +315,11 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
             onSaveRecords = { d, ids, bw ->
                 peakDialog = false
                 vm.setPeak(d, ids, bw)
+            },
+            powerEstimate = vm::powerEstimate,
+            onSavePower = { d, kind, refs, bw ->
+                peakDialog = false
+                vm.setPowerPeak(d, kind, refs, bw)
             },
             onSaveCompetition = { d, disc, bw, birth ->
                 peakDialog = false
@@ -464,6 +494,7 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
                 PeakCard(
                     ui = ui,
                     forecast = vm::compForecast,
+                    powerEstimate = vm::powerEstimate,
                     onEdit = { peakDialog = true },
                     onClear = { vm.clearPeak() },
                 )
@@ -511,6 +542,27 @@ private fun PreviewRow(p: ExercisePreview, globalDeload: Boolean, deloadEvery: I
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(e.name, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
             Tag("Пропуск · выход на пик", MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        return
+    }
+    p.powerLabel?.let { label ->
+        // Пауэр: движение штанги на время подготовки
+        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(e.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Tag("Пауэр · $label", MaterialTheme.colorScheme.primary)
+            }
+            Text(
+                "${Fmt.step(plan.weightKg)} кг · ${plan.sets} × ${plan.targetReps} · ${Fmt.rir(plan.rirMin, plan.rirMax)}",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            if (plan.isCalibration) {
+                Text(
+                    "Калибровка по ориентиру: сделайте подход и честно отметьте запас — по нему посчитаются веса подготовки.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         return
     }
@@ -579,6 +631,7 @@ private val peakDateFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM
 private fun PeakCard(
     ui: HomeUiState,
     forecast: suspend (Discipline, Float, Long) -> Triple<Float, Float, Float>?,
+    powerEstimate: suspend (Power.Kind, Map<Power.Lift, Power.Ref>, Long?) -> List<ru.streetlift.tracker.data.repo.WorkoutRepository.PowerEstimate>,
     onEdit: () -> Unit,
     onClear: () -> Unit,
 ) {
@@ -589,7 +642,7 @@ private fun PeakCard(
             Text("Выход на пик", style = MaterialTheme.typography.titleMedium)
             if (date == null) {
                 Text(
-                    "Выберите дату старта/проходки и упражнения для выхода на пик — за 22 дня план перестроится сам.",
+                    "Выберите дату старта и дисциплину (стритлифтинг или пауэрлифтинг) — за 22 дня план перестроится сам.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -609,7 +662,8 @@ private fun PeakCard(
                 val disc = s.discipline
                 Text(
                     when {
-                        disc != null -> "Соревнования: ${disc.title}"
+                        s.power != null -> "Пауэрлифтинг: ${s.power!!.title}"
+                        disc != null -> "Стритлифтинг: ${disc.title}"
                         names.isEmpty() -> "Пиковые упражнения не выбраны"
                         else -> "Пик: " + names.joinToString(", ")
                     },
@@ -631,6 +685,12 @@ private fun PeakCard(
                         )
                     }
                 }
+                s.power?.let { k ->
+                    val est by androidx.compose.runtime.produceState<List<ru.streetlift.tracker.data.repo.WorkoutRepository.PowerEstimate>>(emptyList(), k, s.powerRefs, date, ui.lastFinished?.id) {
+                        value = powerEstimate(k, s.powerRefMap, date)
+                    }
+                    if (est.isNotEmpty()) PowerSummary(k, est, s.bodyWeightKg)
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = onEdit) { Text("Изменить") }
                     TextButton(onClick = onClear) { Text("Сбросить") }
@@ -642,7 +702,7 @@ private fun PeakCard(
 
 /**
  * Выход на пик: три вкладки, выбор только внутри одной.
- * «Соревнования» — дисциплина с нормативами, «Рекорды» — свои упражнения на максимум, «Выносливость» — бег (позже).
+ * «Стритлифтинг» — дисциплины ISF/WSF, «Пауэрлифтинг» — движения штанги (WRPF), «Выносливость» — бег.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -656,11 +716,19 @@ private fun PeakDialog(
     onDismiss: () -> Unit,
     onSaveRecords: (Long, Set<Long>, Float?) -> Unit,
     onSaveCompetition: (Long, String, Float?, Long?) -> Unit,
+    powerEstimate: suspend (Power.Kind, Map<Power.Lift, Power.Ref>, Long?) -> List<ru.streetlift.tracker.data.repo.WorkoutRepository.PowerEstimate>,
+    onSavePower: (Long, Power.Kind, Map<Power.Lift, Power.Ref>, Float?) -> Unit,
 ) {
     val initialDay = settings.peakEpochDay
     val initialIds = settings.peakIds
     val wasComp = settings.peakMode == SettingsEntity.PEAK_COMPETITION
-    var tab by remember { mutableStateOf(if (settings.endurance) 2 else if (wasComp || initialDay == null) 0 else 1) }
+    val wasPower = settings.power != null
+    var tab by remember { mutableStateOf(if (settings.endurance) 2 else if (wasPower) 3 else 0) }
+    var powerKind by remember { mutableStateOf(settings.power) }
+    // Ориентиры текстом «80 × 5» по движениям
+    var powerRefs by remember {
+        mutableStateOf(settings.powerRefMap.mapValues { (_, r) -> "${Fmt.step(r.weightKg)} × ${r.reps}" })
+    }
     var runDist by remember { mutableStateOf(settings.runDist) }
     var goal by remember { mutableStateOf(settings.runGoalSec?.let { RunPlan.time(it.toDouble()) } ?: "") }
     var perWeek by remember { mutableStateOf(settings.runPerWeek ?: RunPlan.DEFAULT_RUNS) }
@@ -735,7 +803,8 @@ private fun PeakDialog(
                     Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    listOf("Соревнования", "Рекорды", "Выносливость").forEachIndexed { i, t ->
+                    // Пик — только к соревновательным движениям (вкладка «Рекорды» убрана, индекс 1 не используется)
+                    listOf(0 to "Стритлифтинг", 3 to "Пауэрлифтинг", 2 to "Выносливость").forEach { (i, t) ->
                         androidx.compose.material3.FilterChip(selected = tab == i, onClick = { tab = i }, label = { Text(t) })
                     }
                 }
@@ -775,6 +844,14 @@ private fun PeakDialog(
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (tab == 3) {
+                    PowerTab(
+                        kind = powerKind, onKind = { powerKind = it },
+                        refs = powerRefs, onRef = { l, t -> powerRefs = powerRefs + (l to t) },
+                        bodyWeight = bwValue, day = d, estimate = powerEstimate,
+                    )
+                    return@Column
+                }
                 if (tab == 1) {
                     Text(
                         "Упражнения для выхода на пик (остальные — фоновые):",
@@ -846,6 +923,7 @@ private fun PeakDialog(
             val ok = dayOk && when (tab) {
                 0 -> Discipline.byId(discId)?.kind == kind
                 1 -> true
+                3 -> powerKind?.let { k -> k.lifts.all { Power.parseRef(powerRefs[it].orEmpty()) != null } } == true
                 else -> runDist != null && fitness != null && d != null && d - today <= RunPlan.MAX_WEEKS * 7L
             }
             TextButton(
@@ -854,6 +932,9 @@ private fun PeakDialog(
                     when (tab) {
                         0 -> discId?.let { onSaveCompetition(d, it, bwValue, birth) }
                         1 -> onSaveRecords(d, ids, bwValue)
+                        3 -> powerKind?.let { k ->
+                            onSavePower(d, k, k.lifts.associateWith { Power.parseRef(powerRefs[it].orEmpty())!! }, bwValue)
+                        }
                         else -> runDist?.let { dist ->
                             // Цель не задана — середина реалистичного коридора
                             val g = RunPlan.parseTime(goal) ?: fitness?.let { RunPlan.corridor(dist, it, perWeek, d - today).midSec.toInt() }
@@ -865,6 +946,126 @@ private fun PeakDialog(
             ) { Text("Сохранить") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
+}
+
+/**
+ * Вкладка «Пауэр»: одно движение или сумма, ориентир по каждому движению («80 × 5»),
+ * оценка максимума, разряд WRPF (где есть таблица) и прогноз.
+ */
+@Composable
+private fun PowerTab(
+    kind: Power.Kind?,
+    onKind: (Power.Kind) -> Unit,
+    refs: Map<Power.Lift, String>,
+    onRef: (Power.Lift, String) -> Unit,
+    bodyWeight: Float?,
+    day: Long?,
+    estimate: suspend (Power.Kind, Map<Power.Lift, Power.Ref>, Long?) -> List<ru.streetlift.tracker.data.repo.WorkoutRepository.PowerEstimate>,
+) {
+    Text(
+        "Подготовка штангой: на 22 дня до даты движения идут первыми в каждой тренировке. " +
+            "Основная программа сначала в поддержке (меньше подходов, без прогрессии), за 14 дней до старта — полностью убирается.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 6.dp),
+    )
+    Power.Kind.entries.forEach { k ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material3.RadioButton(selected = kind == k, onClick = { onKind(k) })
+            Column(Modifier.weight(1f)) {
+                Text(k.title, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    when (k) {
+                        Power.Kind.TOTAL -> "жим каждую тренировку, присед и тяга через раз · цель — сумма"
+                        Power.Kind.PUSH_PULL -> "жим каждую тренировку, тяга через раз · цель — сумма"
+                        Power.Kind.DEADLIFT -> "каждую тренировку, тяжёлая раз в три"
+                        else -> "каждую тренировку, тяжёлая и лёгкая по очереди"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+    val k = kind ?: return
+    Text("Ориентир по каждому движению — вес и повторы, например «80 × 5». Первая тренировка движения — калибровка по нему.",
+        style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+    k.lifts.forEach { lift ->
+        val t = refs[lift].orEmpty()
+        androidx.compose.material3.OutlinedTextField(
+            value = t,
+            onValueChange = { onRef(lift, it) },
+            label = { Text("${lift.title}: вес × повторы") },
+            singleLine = true,
+            isError = t.isNotBlank() && Power.parseRef(t) == null,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+    val parsed = k.lifts.mapNotNull { l -> Power.parseRef(refs[l].orEmpty())?.let { l to it } }.toMap()
+    val est by androidx.compose.runtime.produceState<List<ru.streetlift.tracker.data.repo.WorkoutRepository.PowerEstimate>>(emptyList(), k, parsed, day) {
+        value = estimate(k, parsed, day)
+    }
+    if (est.isEmpty()) return
+    Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        PowerSummary(k, est, bodyWeight)
+        Text(
+            "Оценка приблизительная: по формуле из подходов (вес, повторы, запас), до подготовки — по ориентиру.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Оценка максимума по движениям, сумма, разряд и прогноз к старту. */
+@Composable
+private fun PowerSummary(k: Power.Kind, est: List<ru.streetlift.tracker.data.repo.WorkoutRepository.PowerEstimate>, bodyWeight: Float?) {
+    fun kg(v: Float) = "${Fmt.step(v)} кг"
+    est.forEach { e ->
+        Text(
+            "${e.lift.title}: " + (e.now?.let { "сейчас ~${kg(it)} на раз" } ?: "нет данных") +
+                (e.forecast?.let { (lo, mid, hi) -> " · к старту ${kg(mid)} (${kg(lo)}–${kg(hi)})" } ?: ""),
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+    val now = est.mapNotNull { it.now }.takeIf { it.size == est.size }?.sum()
+    if (k.isTotal && now != null) {
+        val f = est.mapNotNull { it.forecast?.second }.takeIf { it.size == est.size }?.sum()
+        Text(
+            "Сумма сейчас ~${kg(now)}" + (f?.let { " · к старту ~${kg(it)}" } ?: ""),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+    val table = k.table
+    if (table == null) {
+        Text(
+            if (k == Power.Kind.SQUAT) "Отдельного норматива на присед у WRPF нет — только оценка и прогноз."
+            else "Таблицы нормативов на сумму не нашли — только оценка и прогноз.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+    if (bodyWeight == null) {
+        Text("Укажите свой вес — по нему весовая категория и разряд.", style = MaterialTheme.typography.bodySmall, color = WarnOrange)
+        return
+    }
+    val row = table.rowFor(bodyWeight)
+    val result = est.first().forecast?.second ?: now
+    if (result != null) {
+        val (done, next) = table.evaluate(bodyWeight, result)
+        Text(
+            (done?.let { "Разряд${if (est.first().forecast != null) " по прогнозу" else ""}: ${it.first.title}" } ?: "Разряд пока не выполнен") +
+                (next?.let { n -> " · до ${n.first.title}: ещё ${kg(n.second - result)}" } ?: ""),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+    Text("Нормативы, ${table.label(row)} (${table.federation}):", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 4.dp))
+    Text(
+        table.ranks.zip(row.values).filter { it.second != null }.joinToString(" · ") { (r, v) -> "${r.title} ${Fmt.step(v!!)}" },
+        style = MaterialTheme.typography.bodySmall,
     )
 }
 

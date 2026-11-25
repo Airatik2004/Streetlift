@@ -15,7 +15,9 @@ import ru.streetlift.tracker.data.db.SetLogEntity
 import ru.streetlift.tracker.data.db.SettingsEntity
 import ru.streetlift.tracker.data.db.StageArchiveEntity
 import ru.streetlift.tracker.data.db.StageEntity
+import ru.streetlift.tracker.domain.Competition
 import ru.streetlift.tracker.domain.CycleState
+import ru.streetlift.tracker.domain.SessionPlan
 import ru.streetlift.tracker.domain.Fmt
 import ru.streetlift.tracker.domain.DeloadOverride
 import ru.streetlift.tracker.domain.ExerciseMode
@@ -153,7 +155,8 @@ class WorkoutRepository(private val db: AppDatabase) {
                 isDeload = s.forcedDeload && phase == PeakPhase.NONE,
                 alternating = day.alternating,
                 peakPhase = phase.takeIf { it != PeakPhase.NONE }?.name,
-                peakIds = s.peakExerciseIds.takeIf { phase != PeakPhase.NONE },
+                peakIds = if (phase == PeakPhase.NONE) null
+                else s.power?.let { k -> powerLiftsNext(s, k).joinToString(",") { it.id.toString() } } ?: s.peakExerciseIds,
                 priority = s.priority.name,
                 afterPause = afterPause,
                 cycleInMeso = s.cycleInMeso,
@@ -212,6 +215,7 @@ class WorkoutRepository(private val db: AppDatabase) {
                 peakExerciseIds = exerciseIds.joinToString(","),
                 bodyWeightKg = bodyWeightKg ?: getSettings().bodyWeightKg,
                 peakMode = SettingsEntity.PEAK_RECORDS, compDiscipline = null, compPlan = "",
+                powerKind = null, powerRefs = "", powerSince = null,
                 runDistM = null, runGoalSec = null, runPerWeek = null, runStart = null, runRace = null, runBaseKm = null,
             ),
         )
@@ -222,6 +226,7 @@ class WorkoutRepository(private val db: AppDatabase) {
             getSettings().copy(
                 peakEpochDay = null, peakExerciseIds = "", peakSpanDays = null,
                 peakMode = SettingsEntity.PEAK_RECORDS, compDiscipline = null, compPlan = "",
+                powerKind = null, powerRefs = "", powerSince = null,
                 runDistM = null, runGoalSec = null, runPerWeek = null, runStart = null, runRace = null, runBaseKm = null,
             ),
         )
@@ -278,7 +283,108 @@ class WorkoutRepository(private val db: AppDatabase) {
                 birthDate = birthDate ?: cur.birthDate,
                 peakMode = SettingsEntity.PEAK_COMPETITION,
                 compDiscipline = d.id,
+                powerKind = null, powerRefs = "", powerSince = null,
                 compPlan = competitionSnapshot(d, bw),
+                runDistM = null, runGoalSec = null, runPerWeek = null, runStart = null, runRace = null, runBaseKm = null,
+            ),
+        )
+    }
+
+    // ---------------- Пауэр ----------------
+
+    /** Подходы движений пауэра с начала подготовки (завершённые тренировки, кроме [exclude]). */
+    private suspend fun powerLogs(s: SettingsEntity, exclude: Long?): List<SetLogEntity> {
+        val since = s.powerSince ?: return emptyList()
+        val zone = java.time.ZoneId.systemDefault()
+        val sessions = sessionDao.getAllSessions().filter {
+            it.finishedAt != null && it.id != exclude &&
+                java.time.Instant.ofEpochMilli(it.startedAt).atZone(zone).toLocalDate().toEpochDay() >= since
+        }.map { it.id }.toSet()
+        val names = ru.streetlift.tracker.domain.Power.Lift.entries.map { it.title }.toSet()
+        return sessionDao.getAllSets().filter { it.sessionId in sessions && it.exerciseName in names && !it.isSeconds }
+    }
+
+    /** Движения следующей тренировки подготовки. */
+    private suspend fun powerLiftsNext(s: SettingsEntity, kind: ru.streetlift.tracker.domain.Power.Kind): List<ru.streetlift.tracker.domain.Power.Lift> =
+        ru.streetlift.tracker.domain.Power.liftsFor(kind, powerLogs(s, null).map { it.sessionId }.distinct().size)
+
+    /** Движение в тренировке: план и подпись дня (калибровка / тяжёлая / лёгкая / тонус). */
+    data class PowerItem(val lift: ru.streetlift.tracker.domain.Power.Lift, val plan: SessionPlan, val label: String)
+
+    /** Текущий максимум движения: по подходам подготовки, до них — по ориентиру (null — нет ни того, ни другого). */
+    private fun powerE1rm(logs: List<SetLogEntity>, lift: ru.streetlift.tracker.domain.Power.Lift): Float? =
+        Competition.bestE1rm(0f, logs.filter { it.exerciseName == lift.title }.map { Competition.LiftSet(it.weightKg, it.reps, it.rir) })
+
+    /**
+     * Планы движений тренировки. [lifts] — движения (null — как у следующей тренировки),
+     * [exclude] — идущая тренировка (её подходы не учитываются).
+     */
+    suspend fun powerPlans(phase: PeakPhase, lifts: List<ru.streetlift.tracker.domain.Power.Lift>? = null, exclude: Long? = null): List<PowerItem> {
+        val s = getSettings()
+        val kind = s.power ?: return emptyList()
+        if (phase == PeakPhase.NONE) return emptyList()
+        val logs = powerLogs(s, exclude)
+        val list = lifts ?: ru.streetlift.tracker.domain.Power.liftsFor(kind, logs.map { it.sessionId }.distinct().size)
+        val refs = s.powerRefMap
+        return list.mapNotNull { lift ->
+            val own = logs.filter { it.exerciseName == lift.title }
+            val k = own.map { it.sessionId }.distinct().size
+            val m = if (k == 0) null else powerE1rm(own, lift)
+            val plan = ru.streetlift.tracker.domain.Power.plan(kind, lift, k, m, refs[lift], phase) ?: return@mapNotNull null
+            PowerItem(lift, plan, ru.streetlift.tracker.domain.Power.label(kind, lift, k, m != null, phase))
+        }
+    }
+
+    /** Оценка по движению: максимум на 1 раз сейчас и прогноз к старту (осторожный, средний, смелый). */
+    data class PowerEstimate(val lift: ru.streetlift.tracker.domain.Power.Lift, val now: Float?, val forecast: Triple<Float, Float, Float>?)
+
+    /**
+     * Оценка движений: по подходам подготовки, иначе по подходам за 8 недель, иначе по ориентиру [refs].
+     * Прогноз — по тренду за 12 недель (если данных хватает).
+     */
+    suspend fun powerEstimate(
+        kind: ru.streetlift.tracker.domain.Power.Kind,
+        refs: Map<ru.streetlift.tracker.domain.Power.Lift, ru.streetlift.tracker.domain.Power.Ref>,
+        target: Long?,
+    ): List<PowerEstimate> {
+        val s = getSettings()
+        val logs = if (s.power == kind) powerLogs(s, null) else emptyList()
+        val recent = liftSets(kind.lifts.map { it.title }.toSet())
+        return kind.lifts.map { lift ->
+            val m = powerE1rm(logs, lift)
+                ?: Competition.bestE1rm(0f, recent[lift.title].orEmpty())
+                ?: refs[lift]?.e1rm
+            val f = target?.let { forecast(lift.title, null, it, 0f) }?.let { r ->
+                Triple(
+                    ru.streetlift.tracker.domain.Power.oneRm(lift, r.low.toFloat()),
+                    ru.streetlift.tracker.domain.Power.oneRm(lift, r.mid.toFloat()),
+                    ru.streetlift.tracker.domain.Power.oneRm(lift, r.high.toFloat()),
+                )
+            }
+            PowerEstimate(lift, m?.let { ru.streetlift.tracker.domain.Power.oneRm(lift, it) }, f)
+        }
+    }
+
+    /** Выход на пик в пауэрлифтинге: дата, движение или сумма, ориентиры, свой вес (для весовой категории). */
+    suspend fun setPowerPeak(
+        epochDay: Long,
+        kind: ru.streetlift.tracker.domain.Power.Kind,
+        refs: Map<ru.streetlift.tracker.domain.Power.Lift, ru.streetlift.tracker.domain.Power.Ref>,
+        bodyWeightKg: Float?,
+    ) {
+        val cur = getSettings()
+        val span = if (cur.peakEpochDay == epochDay && cur.peakSpanDays != null) cur.peakSpanDays
+        else (epochDay - today()).toInt().coerceIn(Peaking.MIN_SPAN, Peaking.FULL_SPAN)
+        // То же движение и та же дата — калибровка и история подготовки сохраняются
+        val same = cur.power == kind && cur.peakEpochDay == epochDay
+        settingsDao.upsert(
+            cur.copy(
+                peakEpochDay = epochDay, peakSpanDays = span, peakExerciseIds = "",
+                bodyWeightKg = bodyWeightKg ?: cur.bodyWeightKg,
+                peakMode = SettingsEntity.PEAK_POWER, compDiscipline = null, compPlan = "",
+                powerKind = kind.name, powerRefs = ru.streetlift.tracker.domain.Power.encodeRefs(refs),
+                // Подготовка начинается за span дней до старта (раньше — обычная программа)
+                powerSince = if (same && cur.powerSince != null) cur.powerSince else epochDay - span,
                 runDistM = null, runGoalSec = null, runPerWeek = null, runStart = null, runRace = null, runBaseKm = null,
             ),
         )
@@ -352,6 +458,7 @@ class WorkoutRepository(private val db: AppDatabase) {
             getSettings().copy(
                 peakEpochDay = null, peakExerciseIds = "", peakSpanDays = null,
                 peakMode = SettingsEntity.PEAK_ENDURANCE, compDiscipline = null, compPlan = "",
+                powerKind = null, powerRefs = "", powerSince = null,
                 runDistM = dist.m, runGoalSec = goalSec, runPerWeek = perWeek, runStart = today(), runRace = race,
                 runBaseKm = ru.streetlift.tracker.domain.RunPlan.recentWeeklyKm(runs, today()).toFloat(),
             ),
@@ -408,6 +515,7 @@ class WorkoutRepository(private val db: AppDatabase) {
             s.copy(
                 peakEpochDay = null, peakExerciseIds = "", peakSpanDays = null, cycleInMeso = 1, deloadOverride = DeloadOverride.AUTO,
                 mesoIndex = s.mesoIndex + 1, peakMode = SettingsEntity.PEAK_RECORDS, compDiscipline = null, compPlan = "",
+                powerKind = null, powerRefs = "", powerSince = null,
             ),
         )
     }

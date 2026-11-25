@@ -77,6 +77,10 @@ data class SettingsEntity(
     val runBaseKm: Float? = null,
     /** Дата рождения (epochDay, v26) — возраст для дивизионов считается на день старта. Старое поле birthYear не используется. */
     val birthDate: Long? = null,
+    /** Пауэр (v29): движение или сумма (Power.Kind), ориентиры (Power.encodeRefs), день начала подготовки. */
+    val powerKind: String? = null,
+    val powerRefs: String = "",
+    val powerSince: Long? = null,
 ) {
     companion object {
         fun ageOn(birth: Long, day: Long): Int =
@@ -87,7 +91,15 @@ data class SettingsEntity(
         const val PEAK_RECORDS = "RECORDS"
         const val PEAK_COMPETITION = "COMPETITION"
         const val PEAK_ENDURANCE = "ENDURANCE"
+        const val PEAK_POWER = "POWER"
     }
+
+    /** Идёт выход на пик в пауэрлифтинге (движения штанги вместо обычной программы). */
+    val power: ru.streetlift.tracker.domain.Power.Kind?
+        get() = if (peakMode == PEAK_POWER && peakEpochDay != null) ru.streetlift.tracker.domain.Power.Kind.byId(powerKind) else null
+
+    val powerRefMap: Map<ru.streetlift.tracker.domain.Power.Lift, ru.streetlift.tracker.domain.Power.Ref>
+        get() = ru.streetlift.tracker.domain.Power.decodeRefs(powerRefs)
 
     /** Идёт подготовка к забегу: силовые в поддержке. */
     val endurance: Boolean get() = peakMode == PEAK_ENDURANCE && runRace != null
@@ -145,6 +157,13 @@ data class SettingsEntity(
 
     val canUndoSkip: Boolean get() = undoDayIndex != null
 }
+
+/** Движение пауэра в тренировке: в базе его нет, id отрицательный (Power.Lift.id). */
+fun powerExercise(lift: ru.streetlift.tracker.domain.Power.Lift, dayId: Long, position: Int) = ExerciseEntity(
+    id = lift.id, dayId = dayId, position = position, name = lift.title, type = ExerciseType.HEAVY_LEVER,
+    minSets = 1, maxSets = 5, minReps = 1, maxReps = 5, targetRirMin = 1, targetRirMax = 2,
+    weightStep = lift.step, plannedSets = 3, targetReps = 3,
+)
 
 @Serializable
 @Entity(tableName = "days")

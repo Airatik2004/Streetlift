@@ -403,7 +403,8 @@ private fun RestPanel(timer: RestTimer.State, ui: WorkoutUi) {
         textAlign = TextAlign.Center,
     )
     Text(
-        if (cur.plan.isCalibration) "Калибровка · ${Fmt.range(cur.plan.repsMin, cur.plan.repsMax)} ${if (cur.exercise.isSeconds) "с" else "повт."} · RIR ${cur.plan.rirMin}"
+        if (ru.streetlift.tracker.domain.Power.Lift.byId(cur.exercise.id) != null) "${Fmt.step(cur.plan.weightKg)} кг · ${cur.plan.targetReps} повт. · ${Fmt.rir(cur.plan.rirMin, cur.plan.rirMax)}"
+        else if (cur.plan.isCalibration) "Калибровка · ${Fmt.range(cur.plan.repsMin, cur.plan.repsMax)} ${if (cur.exercise.isSeconds) "с" else "повт."} · RIR ${cur.plan.rirMin}"
         else "${Fmt.weight(cur.plan.weightKg)} · ${Fmt.range(cur.plan.repsMin, cur.plan.repsMax)} ${if (cur.exercise.isSeconds) "с" else "повт."} · ${Fmt.rir(cur.plan.rirMin, cur.plan.rirMax)}",
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -473,6 +474,10 @@ private fun WorkPanel(
     }
     Text(
         when {
+            ru.streetlift.tracker.domain.Power.Lift.byId(cur.exercise.id) != null && plan.isCalibration ->
+                "Калибровка: ${Fmt.step(plan.weightKg)} кг на ${plan.targetReps} повт. (или сколько выйдет), честно отметьте запас — по подходу посчитаются веса подготовки"
+            ru.streetlift.tracker.domain.Power.Lift.byId(cur.exercise.id) != null ->
+                "${Fmt.step(plan.weightKg)} кг на штанге · ${plan.targetReps} повт. · ${Fmt.rir(plan.rirMin, plan.rirMax)}"
             cur.exercise.isJump && plan.isCalibration -> "Калибровка: поставьте максимальную высоту (кратно 15 см), на которую уверенно прыгаете, без веса"
             cur.exercise.isJump -> "${plan.heightCm} см · ${Fmt.weight(plan.weightKg)} · ${plan.targetReps} прыжков, чистое приземление"
             plan.isCalibration -> "Калибровка: подберите вес/стадию на ${Fmt.range(plan.repsMin, plan.repsMax)} $unit с запасом ${plan.rirMin}"

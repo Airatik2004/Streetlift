@@ -14,7 +14,15 @@ import kotlin.math.max
  * - статика и изоляция (задняя дельта) — без разминки.
  */
 object Warmup {
-    data class WSet(val weightKg: Float, val reps: Int, val heightCm: Int? = null)
+    /** [side] — сторона у односторонних упражнений («L»/«R»), иначе null. */
+    data class WSet(val weightKg: Float, val reps: Int, val heightCm: Int? = null, val side: String? = null)
+
+    /** Односторонние: каждый подход на обе стороны, начиная со слабой [first]. */
+    fun withSides(list: List<WSet>, first: String?): List<WSet> {
+        if (first == null) return list
+        val second = if (first == "L") "R" else "L"
+        return list.flatMap { listOf(it.copy(side = first), it.copy(side = second)) }
+    }
 
     const val SETS = 3
     const val DELOAD_SETS = 2

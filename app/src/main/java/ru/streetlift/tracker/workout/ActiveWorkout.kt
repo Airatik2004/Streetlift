@@ -130,8 +130,10 @@ object ActiveWorkout {
             // Разминка тем же движением перед первым подходом каждого упражнения
             val warmups = exercises.associate { e ->
                 val lift = ru.streetlift.tracker.domain.Power.Lift.byId(e.id)
-                e.id to if (lift != null) ru.streetlift.tracker.domain.Power.warmup(lift, plans.getValue(e.id))
+                val base = if (lift != null) ru.streetlift.tracker.domain.Power.warmup(lift, plans.getValue(e.id))
                 else ru.streetlift.tracker.domain.Warmup.sets(e.type, e.isSeconds, e.isJump, plans.getValue(e.id), e.loadScale)
+                // Односторонние — каждый подход на обе стороны, со слабой
+                e.id to ru.streetlift.tracker.domain.Warmup.withSides(base, firstSides[e.id])
             }
             warmupLists = warmups
             combine(repo.observeSets(sessionId), extra, prefill, RestTimer.state, warmupDone) { logs, ex, pf, timer, wd ->
@@ -179,7 +181,9 @@ object ActiveWorkout {
         // Разминка: отметить подход и короткий отдых, в историю не пишется
         r.warmup?.let { w ->
             warmupDone.update { it + (w.block.exercise.id to w.index + 1) }
-            TimerActions.start(ctx.applicationContext, WARMUP_REST_MS, owner = owner(r.session.id))
+            // Первая сторона — 30 с на смену стороны, иначе обычный отдых разминки
+            val switchSide = w.set.side != null && w.index % 2 == 0
+            TimerActions.start(ctx.applicationContext, if (switchSide) SIDE_SWITCH_MS else WARMUP_REST_MS, owner = owner(r.session.id))
             return
         }
         val d = if (byPlan) {

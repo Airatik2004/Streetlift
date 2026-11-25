@@ -61,4 +61,16 @@ class WarmupTest {
         assertTrue(bad.isDeload); assertTrue(bad.sets < 5); assertEquals(3, bad.rirMin)
         assertEquals(p, applyReadiness(p.copy(isCalibration = true), READINESS_BAD).copy(isCalibration = false))
     }
+
+    @Test
+    fun unilateral_bothSides_weakFirst() {
+        val base = Warmup.sets(ExerciseType.HEAVY_LEVER, false, false, plan(20f), scale)
+        val s = Warmup.withSides(base, "R")
+        assertEquals(6, s.size)
+        assertEquals(listOf("R", "L", "R", "L", "R", "L"), s.map { it.side })
+        assertEquals(base.map { it.weightKg }, s.filter { it.side == "R" }.map { it.weightKg })
+        assertEquals(base, Warmup.withSides(base, null))
+        assertEquals("Разминка 2 из 3 · левая", ru.streetlift.tracker.workout.warmupLabel(3, 6, "L"))
+        assertEquals("Разминка 2 из 3", ru.streetlift.tracker.workout.warmupLabel(1, 3, null))
+    }
 }

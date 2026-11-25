@@ -53,7 +53,20 @@ sealed interface StepRow {
 }
 
 /** Текущий разминочный подход. */
-data class WarmupStep(val block: ExerciseBlock, val index: Int, val total: Int, val set: ru.streetlift.tracker.domain.Warmup.WSet)
+data class WarmupStep(val block: ExerciseBlock, val index: Int, val total: Int, val set: ru.streetlift.tracker.domain.Warmup.WSet) {
+    /** «Разминка 1 из 3 · левая» (у односторонних — номер подхода, а не стороны). */
+    val label: String get() = warmupLabel(index, total, set.side)
+}
+
+/** «Разминка 1 из 3» / «Разминка 1 из 3 · левая». */
+fun warmupLabel(index: Int, total: Int, side: String?): String =
+    if (side != null) "Разминка ${index / 2 + 1} из ${total / 2} · ${sideName(side)}"
+    else "Разминка ${index + 1} из $total"
+
+/** «45 см · +5 × 3» / «−30 · Чёрная × 5». */
+fun warmupSetText(w: ru.streetlift.tracker.domain.Warmup.WSet): String =
+    (w.heightCm?.let { "$it см · " } ?: "") + ru.streetlift.tracker.domain.Fmt.weightValue(w.weightKg) +
+        (ru.streetlift.tracker.domain.Bands.describe(w.weightKg)?.let { " · $it" } ?: "") + " × ${w.reps}"
 
 /** Значения для ввода подхода. */
 data class Draft(val weight: Float, val reps: Int, val rir: Int, val stage: String?, val height: Int? = null)
@@ -83,9 +96,10 @@ data class PlanResult(
 
     /** «Отжимания в горизонте · подход 3 из 4». */
     val exerciseLine: String
-        get() = current?.let {
-            "${it.exercise.name} · подход $setNumber из ${it.plannedCount}" + (side?.let { s -> " · ${sideName(s)}" } ?: "")
-        } ?: "Все подходы сделаны"
+        get() = warmup?.let { "${it.block.exercise.name} · ${it.label.replaceFirstChar { c -> c.lowercase() }}" }
+            ?: current?.let {
+                "${it.exercise.name} · подход $setNumber из ${it.plannedCount}" + (side?.let { s -> " · ${sideName(s)}" } ?: "")
+            } ?: "Все подходы сделаны"
 }
 
 /** Порядок подходов, текущий шаг и список шагов — общая логика экрана и уведомления. */

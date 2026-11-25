@@ -211,6 +211,7 @@ class TimerService : Service() {
 
     private fun planLine(r: PlanResult): String {
         val cur = r.current ?: return "Откройте приложение, чтобы завершить тренировку"
+        r.warmup?.let { return "в историю не пишется · " + ru.streetlift.tracker.workout.warmupSetText(it.set) }
         val p = cur.plan
         val u = if (cur.exercise.isSeconds) "с" else "повт."
         if (cur.exercise.isJump) {
@@ -236,7 +237,7 @@ class TimerService : Service() {
         val progress: Int
         if (workStep && r != null) {
             title = r.current?.exercise?.name ?: "Все подходы сделаны"
-            text = r.current?.let {
+            text = r.warmup?.let { "${it.label} · ${planLine(r)}" } ?: r.current?.let {
                 "Подход ${r.setNumber} из ${it.plannedCount}" +
                     (r.side?.let { s -> " · ${ru.streetlift.tracker.workout.sideName(s)}" } ?: "") + " · ${planLine(r)}"
             } ?: planLine(r)

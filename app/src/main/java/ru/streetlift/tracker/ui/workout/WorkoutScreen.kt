@@ -236,7 +236,8 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "Разминка · ${row.block.exercise.name} ${row.index + 1}/${row.total}",
+                            "Разминка · ${row.block.exercise.name} " +
+                                (if (row.set.side != null) "${row.index / 2 + 1}/${row.total / 2} ${sideLetter(row.set.side)}" else "${row.index + 1}/${row.total}"),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f),
@@ -271,12 +272,12 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                                 val gap = l2 != null && kotlin.math.abs(log.reps - l2.reps) >= 2
                                 Text(
                                     if (sided) {
-                                        "${Fmt.weightValue(log.weightKg)} × ${sideLetter(log.side)} ${log.reps}" +
+                                        "${bandWeight(log.weightKg)} × ${sideLetter(log.side)} ${log.reps}" +
                                             (l2?.let { " / ${sideLetter(it.side)} ${it.reps}" } ?: "") + " · ${Fmt.rirValue(minOf(log.rir, l2?.rir ?: log.rir))}"
                                     } else if (log.heightCm != null) {
-                                        "${log.heightCm} см · ${Fmt.weightValue(log.weightKg)} × ${log.reps}"
+                                        "${log.heightCm} см · ${bandWeight(log.weightKg)} × ${log.reps}"
                                     } else {
-                                        "${Fmt.weightValue(log.weightKg)} × ${log.reps}${if (log.isSeconds) " с" else ""} · ${Fmt.rirValue(log.rir)}"
+                                        "${bandWeight(log.weightKg)} × ${log.reps}${if (log.isSeconds) " с" else ""} · ${Fmt.rirValue(log.rir)}"
                                     },
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = if (gap) ru.streetlift.tracker.ui.theme.WarnOrange else DeloadGreen,
@@ -607,6 +608,10 @@ private fun HoldStopwatch(marks: List<Int>, cap: Int?, onResult: (Int) -> Unit) 
     }
 }
 
+/** «+10» / «−30 · Чёрная» — с названием резины. */
+private fun bandWeight(w: Float): String =
+    Fmt.weightValue(w) + (ru.streetlift.tracker.domain.Bands.describe(w)?.let { " · $it" } ?: "")
+
 /** «Л» / «П». */
 private fun sideLetter(s: String?) = when (s) {
     "L" -> "Л"
@@ -614,15 +619,14 @@ private fun sideLetter(s: String?) = when (s) {
     else -> ""
 }
 
-/** «+10 кг × 3» / «45 см × 3». */
-private fun warmupText(w: ru.streetlift.tracker.domain.Warmup.WSet): String =
-    (w.heightCm?.let { "$it см · " } ?: "") + "${Fmt.weightValue(w.weightKg)} × ${w.reps}"
+/** «+10 × 3» / «45 см · 0 × 3» / «−30 · Чёрная × 5». */
+private fun warmupText(w: ru.streetlift.tracker.domain.Warmup.WSet): String = ru.streetlift.tracker.workout.warmupSetText(w)
 
 /** Текущий разминочный подход: тем же движением, в историю не пишется. */
 @Composable
 private fun WarmupPanel(w: ru.streetlift.tracker.workout.WarmupStep) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    Text("Разминка ${w.index + 1} из ${w.total}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+    Text(w.label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
     Text(w.block.exercise.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
     Spacer(Modifier.height(6.dp))
     Text(warmupText(w.set), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)

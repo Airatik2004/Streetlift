@@ -93,10 +93,12 @@ class WorkoutRepository(private val db: AppDatabase) {
         )
     }
 
-    /** Сохранить набор резин (название + помощь в кг). */
+    /** Сохранить набор резин (название + помощь в кг + скрыта). Повторы названий отбрасываются. */
     suspend fun setBands(bands: List<ru.streetlift.tracker.domain.Band>) {
-        val clean = bands.filter { it.name.isNotBlank() && it.kg > 0f }
-            .map { it.copy(name = it.name.replace(",", " ").replace(":", " ").trim()) }
+        val clean = bands
+            .map { it.copy(name = it.name.replace(",", " ").replace(":", " ").trim().trimStart('~').trim()) }
+            .filter { it.name.isNotBlank() && it.kg > 0f }
+            .distinctBy { ru.streetlift.tracker.domain.Bands.nameKey(it.name) }
         settingsDao.upsert(getSettings().copy(bands = ru.streetlift.tracker.domain.Bands.encode(clean)))
         snapAssistWeights()
     }

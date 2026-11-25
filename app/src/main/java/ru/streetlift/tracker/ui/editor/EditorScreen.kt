@@ -3,8 +3,11 @@ package ru.streetlift.tracker.ui.editor
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.ui.draw.alpha
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.foundation.layout.Arrangement
@@ -199,7 +202,7 @@ fun EditorScreen(repo: WorkoutRepository) {
                         Column(Modifier.weight(1f)) {
                             Text("Резины", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                s.bandList.joinToString(" · ") { "${it.name} ${Fmt.step(it.kg)} кг" }.ifEmpty { "нет" },
+                                s.bandList.joinToString(" · ") { "${it.name} ${Fmt.step(it.kg)} кг" + if (it.hidden) " (скрыта)" else "" }.ifEmpty { "нет" },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -401,8 +404,11 @@ private fun BandsDialog(
     onDismiss: () -> Unit,
     onSave: (List<ru.streetlift.tracker.domain.Band>) -> Unit,
 ) {
-    val rows = remember { androidx.compose.runtime.mutableStateListOf<Pair<String, String>>().apply { addAll(initial.map { it.name to Fmt.step(it.kg) }) } }
-    val valid = rows.all { (n, kg) -> n.isNotBlank() && (kg.replace(',', '.').toFloatOrNull() ?: 0f) > 0f }
+    val rows = remember {
+        androidx.compose.runtime.mutableStateListOf<BandRow>().apply { addAll(initial.map { BandRow(it.name, Fmt.step(it.kg), it.hidden) }) }
+    }
+    val dups = ru.streetlift.tracker.domain.Bands.duplicateIndices(rows.map { it.name })
+    val valid = dups.isEmpty() && rows.all { r -> r.name.isNotBlank() && (r.kg.replace(',', '.').toFloatOrNull() ?: 0f) > 0f }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Резины") },
@@ -412,40 +418,52 @@ private fun BandsDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "Помощь каждой резины в кг. Лестница сочетаний собирается сама.",
+                    "Помощь каждой резины в кг. Лестница сочетаний собирается сама. Скрытая резина не попадает в программу, но остаётся в списке.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                rows.forEachIndexed { i, (name, kg) ->
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                rows.forEachIndexed { i, r ->
+                    val dim = if (r.hidden) Modifier.alpha(0.5f) else Modifier
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         OutlinedTextField(
-                            value = name,
-                            onValueChange = { rows[i] = it to kg },
-                            label = { Text("Название") },
+                            value = r.name,
+                            onValueChange = { rows[i] = r.copy(name = it) },
+                            label = { Text(if (r.hidden) "Название (скрыта)" else "Название") },
                             singleLine = true,
-                            modifier = Modifier.weight(1.4f),
+                            isError = i in dups,
+                            supportingText = if (i in dups) ({ Text("Такое название уже есть") }) else null,
+                            modifier = Modifier.weight(1.4f).then(dim),
                         )
                         OutlinedTextField(
-                            value = kg,
-                            onValueChange = { rows[i] = name to it },
+                            value = r.kg,
+                            onValueChange = { rows[i] = r.copy(kg = it) },
                             label = { Text("кг") },
                             singleLine = true,
-                            isError = (kg.replace(',', '.').toFloatOrNull() ?: 0f) <= 0f,
+                            isError = (r.kg.replace(',', '.').toFloatOrNull() ?: 0f) <= 0f,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).then(dim),
                         )
+                        IconButton(onClick = { rows[i] = r.copy(hidden = !r.hidden) }) {
+                            Icon(
+                                if (r.hidden) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = if (r.hidden) "Показать" else "Скрыть",
+                            )
+                        }
                         IconButton(onClick = { rows.removeAt(i) }) { Icon(Icons.Filled.Delete, contentDescription = "Удалить") }
                     }
                 }
                 if (rows.size < 8) {
-                    TextButton(onClick = { rows.add("" to "") }) { Text("+ Добавить резину") }
+                    TextButton(onClick = { rows.add(BandRow("", "", false)) }) { Text("+ Добавить резину") }
                 }
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
-                    onSave(rows.map { (n, kg) -> ru.streetlift.tracker.domain.Band(n.trim(), kg.replace(',', '.').toFloat()) }.sortedByDescending { it.kg })
+                    onSave(
+                        rows.map { r -> ru.streetlift.tracker.domain.Band(r.name.trim(), r.kg.replace(',', '.').toFloat(), r.hidden) }
+                            .sortedByDescending { it.kg },
+                    )
                 },
                 enabled = valid,
             ) { Text("Сохранить") }
@@ -453,6 +471,9 @@ private fun BandsDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
     )
 }
+
+/** Строка редактора резин. */
+private data class BandRow(val name: String, val kg: String, val hidden: Boolean)
 
 /** Напоминания о тренировке: накануне, в день и вечером, если не сделана; время — по нажатию. */
 @Composable

@@ -3,8 +3,8 @@ package ru.streetlift.tracker.domain
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/** Резина: название и помощь в кг. */
-data class Band(val name: String, val kg: Float)
+/** Резина: название и помощь в кг; [hidden] — скрыта из программ (лестница, план, разминка), но не удалена. */
+data class Band(val name: String, val kg: Float, val hidden: Boolean = false)
 
 /** Сочетание резин: помощь (отрицательный вес) и что взять. */
 data class BandCombo(val weight: Float, val bands: List<Band>) {
@@ -37,7 +37,7 @@ object Bands {
     /** Все сочетания по возрастанию веса (от самой большой помощи к самой маленькой). */
     fun combos(bands: List<Band> = current): List<BandCombo> {
         if (bands === current) cache?.let { return it }
-        val list = bands.filter { it.kg > 0f }
+        val list = bands.filter { it.kg > 0f && !it.hidden }
         val best = HashMap<Int, List<Band>>()
         for (mask in 1 until (1 shl list.size)) {
             val chosen = list.filterIndexed { i, _ -> mask and (1 shl i) != 0 }
@@ -60,15 +60,30 @@ object Bands {
         return combos(bands).firstOrNull { abs(it.weight - weight) < 0.01f }?.label
     }
 
-    /** Хранение в настройках: «Зелёная:75,Фиолетовая:45». */
-    fun encode(bands: List<Band>): String = bands.joinToString(",") { "${it.name}:${Fmt.step(it.kg)}" }
+    /** Метка скрытой резины в начале названия при хранении. */
+    const val HIDDEN_MARK = "~"
+
+    /** Хранение в настройках: «Зелёная:75,~Фиолетовая:45» (~ — скрыта). */
+    fun encode(bands: List<Band>): String =
+        bands.joinToString(",") { (if (it.hidden) HIDDEN_MARK else "") + "${it.name}:${Fmt.step(it.kg)}" }
+
+    /** Название для сравнения: без пробелов по краям и без учёта регистра. */
+    fun nameKey(name: String): String = name.trim().lowercase()
+
+    /** Индексы строк, чьё название повторяет другое (пустые не считаются). */
+    fun duplicateIndices(names: List<String>): Set<Int> {
+        val keys = names.map(::nameKey)
+        return keys.indices.filter { i -> keys[i].isNotEmpty() && keys.count { it == keys[i] } > 1 }.toSet()
+    }
 
     fun decode(s: String?): List<Band> {
         val parsed = s.orEmpty().split(',').mapNotNull { part ->
             val i = part.lastIndexOf(':')
             if (i <= 0) return@mapNotNull null
             val kg = part.substring(i + 1).trim().replace(',', '.').toFloatOrNull() ?: return@mapNotNull null
-            Band(part.substring(0, i).trim(), kg)
+            val raw = part.substring(0, i).trim()
+            val hidden = raw.startsWith(HIDDEN_MARK)
+            Band(raw.removePrefix(HIDDEN_MARK).trim(), kg, hidden)
         }
         return if (s == null) DEFAULT else parsed
     }

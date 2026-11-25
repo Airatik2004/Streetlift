@@ -109,9 +109,9 @@ fun AppRoot(repo: WorkoutRepository) {
             composable("main") {
               val active by repo.activeSession.collectAsStateWithLifecycle(initialValue = null)
               androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
-                // Незавершённая тренировка — закреплена сверху на «Главной» и в «Цикле», не уезжает при прокрутке
+                // Незавершённая тренировка — закреплена сверху на всех вкладках, не уезжает при прокрутке
                 val a = active
-                if (a != null && pager.currentPage <= 1) ActiveWorkoutBar(a.dayName) { nav.navigate("workout/${a.id}") { launchSingleTop = true } }
+                if (a != null) ActiveWorkoutBar(a.dayName) { nav.navigate("workout/${a.id}") { launchSingleTop = true } }
                 androidx.compose.foundation.pager.HorizontalPager(
                     state = pager, beyondViewportPageCount = 1, modifier = Modifier.weight(1f),
                 ) { page ->

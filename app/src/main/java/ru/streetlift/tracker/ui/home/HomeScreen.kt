@@ -192,7 +192,8 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
     var peakDialog by remember { mutableStateOf(false) }
     if (peakDialog) {
         PeakDialog(
-            initialDay = ui.settings.peakEpochDay ?: (LocalDate.now().toEpochDay() + 21),
+            // Новая подводка — дата не подставляется, выбирается вручную
+            initialDay = ui.settings.peakEpochDay,
             initialIds = ui.settings.peakIds,
             initialBodyWeight = ui.settings.bodyWeightKg,
             exercises = ui.allExercises,
@@ -520,7 +521,7 @@ private fun PeakCard(ui: HomeUiState, onEdit: () -> Unit, onClear: () -> Unit) {
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun PeakDialog(
-    initialDay: Long,
+    initialDay: Long?,
     initialIds: Set<Long>,
     initialBodyWeight: Float?,
     exercises: List<ExerciseEntity>,
@@ -528,18 +529,19 @@ private fun PeakDialog(
     onDismiss: () -> Unit,
     onSave: (Long, Set<Long>, Float?) -> Unit,
 ) {
-    var day by remember { mutableStateOf(initialDay) }
+    var day by remember { mutableStateOf<Long?>(initialDay) }
     var bw by remember { mutableStateOf(initialBodyWeight?.let { Fmt.step(it) } ?: "") }
     var ids by remember { mutableStateOf(initialIds) }
     var picking by remember { mutableStateOf(false) }
     val today = LocalDate.now().toEpochDay()
     val minDay = today + Peaking.MIN_SPAN
     // Уже выставленную дату можно оставить, новую — не ближе 7 дней
-    val dayOk = day >= minDay || day == initialDay && initialIds.isNotEmpty()
+    val d = day
+    val dayOk = d != null && (d >= minDay || d == initialDay && initialIds.isNotEmpty())
 
     if (picking) {
         val state = androidx.compose.material3.rememberDatePickerState(
-            initialSelectedDateMillis = maxOf(day, minDay) * 86_400_000L,
+            initialSelectedDateMillis = d?.let { maxOf(it, minDay) * 86_400_000L },
             selectableDates = object : androidx.compose.material3.SelectableDates {
                 override fun isSelectableDate(utcTimeMillis: Long): Boolean = utcTimeMillis / 86_400_000L >= minDay
                 override fun isSelectableYear(year: Int): Boolean = year >= LocalDate.ofEpochDay(minDay).year
@@ -567,17 +569,18 @@ private fun PeakDialog(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 OutlinedButton(onClick = { picking = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Дата: " + LocalDate.ofEpochDay(day).format(peakDateFmt))
+                    Text(if (d == null) "Выбрать дату" else "Дата: " + LocalDate.ofEpochDay(d).format(peakDateFmt))
                 }
-                val left = day - today
+                val left = (d ?: today) - today
                 Text(
                     when {
+                        d == null -> "Выберите дату пика. Ближе 7 дней выбрать нельзя."
                         !dayOk -> "Ближе 7 дней выбрать нельзя — выберите другую дату."
                         left < Peaking.FULL_SPAN -> "До пика $left ${plural(left.toInt(), "день", "дня", "дней")} — меньше 22, подготовка будет ускоренной: отдых и тонус полностью, остальное сокращается. Ближе 7 дней выбрать нельзя."
                         else -> "Полная подготовка начнётся за 22 дня до даты. Ближе 7 дней выбрать нельзя."
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (!dayOk || left < Peaking.FULL_SPAN) WarnOrange else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (d != null && (!dayOk || left < Peaking.FULL_SPAN)) WarnOrange else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 androidx.compose.material3.OutlinedTextField(
                     value = bw,
@@ -619,7 +622,7 @@ private fun PeakDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(day, ids, bw.replace(',', '.').toFloatOrNull()?.takeIf { it > 0f }) },
+                onClick = { if (d != null) onSave(d, ids, bw.replace(',', '.').toFloatOrNull()?.takeIf { it > 0f }) },
                 enabled = dayOk,
             ) { Text("Сохранить") }
         },

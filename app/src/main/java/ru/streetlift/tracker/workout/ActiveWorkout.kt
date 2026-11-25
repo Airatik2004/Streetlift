@@ -90,7 +90,10 @@ object ActiveWorkout {
             val phase = session.peakPhase?.let { runCatching { PeakPhase.valueOf(it) }.getOrNull() } ?: PeakPhase.NONE
             val peakIds = session.peakIds?.split(',')?.mapNotNull { it.trim().toLongOrNull() }?.toSet().orEmpty()
             val plans = all.mapNotNull { e ->
-                Peaking.resolve(e.toConfig(), e.toState(), e.type, phase == PeakPhase.NONE && e.plannedDeload(st.deloadEvery, session.isDeload), phase, e.id in peakIds, bodyWeight)
+                Peaking.resolve(
+                    e.toConfig(), e.toState(), e.type, phase == PeakPhase.NONE && e.plannedDeload(st.deloadEvery, session.isDeload), phase, e.id in peakIds, bodyWeight,
+                    comp = st.compTarget(e.id, e.name),
+                )
                     // Первая тренировка подготовки после паузы — на подход меньше
                     ?.let { if (session.afterPause) it.copy(sets = (it.sets - 1).coerceAtLeast(1)) else it }
                     ?.let { if (e.isJump) ru.streetlift.tracker.domain.jumpPlan(e.jumpState, it) else it }

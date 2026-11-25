@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
@@ -54,6 +55,9 @@ import ru.streetlift.tracker.data.db.ExerciseEntity
 import ru.streetlift.tracker.data.db.SessionEntity
 import ru.streetlift.tracker.data.db.SettingsEntity
 import ru.streetlift.tracker.data.repo.WorkoutRepository
+import ru.streetlift.tracker.domain.CompKind
+import ru.streetlift.tracker.domain.Competition
+import ru.streetlift.tracker.domain.Discipline
 import ru.streetlift.tracker.domain.Fmt
 import ru.streetlift.tracker.domain.PeakPhase
 import ru.streetlift.tracker.domain.Peaking
@@ -124,7 +128,7 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
         val previews = if (day == null) emptyList() else ru.streetlift.tracker.domain.ProgramOrder.order(
             day.position, exs.filter { it.dayId == day.id && it.activeInSlot(ru.streetlift.tracker.data.db.nextAltSlot(lastAlt)) }.sortedBy { it.position }, s.priority,
         ) { phase != PeakPhase.NONE && it.id in peakIds }
-            .map { ExercisePreview(it, Peaking.resolve(it.toConfig(), it.toState(), it.type, phase == PeakPhase.NONE && it.plannedDeload(s.deloadEvery, global), phase, it.id in peakIds, s.bodyWeightKg)
+            .map { ExercisePreview(it, Peaking.resolve(it.toConfig(), it.toState(), it.type, phase == PeakPhase.NONE && it.plannedDeload(s.deloadEvery, global), phase, it.id in peakIds, s.bodyWeightKg, s.compTarget(it.id, it.name))
                 ?.let { p -> if (afterPause) p.copy(sets = (p.sets - 1).coerceAtLeast(1)) else p }
                 ?.let { p -> if (it.isJump) ru.streetlift.tracker.domain.jumpPlan(it.jumpState, p) else p }) }
         val dayOrder = days.associate { it.id to it.position }
@@ -161,6 +165,9 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
     fun setDeload(want: Boolean) = viewModelScope.launch { repo.setDeload(want) }
     fun setPeak(epochDay: Long, ids: Set<Long>, bw: Float?) = viewModelScope.launch { repo.setPeak(epochDay, ids, bw) }
     fun clearPeak() = viewModelScope.launch { repo.clearPeak() }
+    fun setCompetitionPeak(epochDay: Long, disc: String, bw: Float?, year: Int?) =
+        viewModelScope.launch { repo.setCompetitionPeak(epochDay, disc, bw, year) }
+    suspend fun estimate(d: Discipline, bw: Float?): Competition.Estimate? = repo.competitionEstimate(d, bw)
 
     init {
         viewModelScope.launch { repo.checkPeakExpired() }
@@ -193,15 +200,18 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
     if (peakDialog) {
         PeakDialog(
             // Новая подводка — дата не подставляется, выбирается вручную
-            initialDay = ui.settings.peakEpochDay,
-            initialIds = ui.settings.peakIds,
-            initialBodyWeight = ui.settings.bodyWeightKg,
+            settings = ui.settings,
             exercises = ui.allExercises,
             dayNames = ui.days.associate { it.id to it.name },
+            estimate = vm::estimate,
             onDismiss = { peakDialog = false },
-            onSave = { d, ids, bw ->
+            onSaveRecords = { d, ids, bw ->
                 peakDialog = false
                 vm.setPeak(d, ids, bw)
+            },
+            onSaveCompetition = { d, disc, bw, year ->
+                peakDialog = false
+                vm.setCompetitionPeak(d, disc, bw, year)
             },
         )
     }
@@ -504,8 +514,13 @@ private fun PeakCard(ui: HomeUiState, onEdit: () -> Unit, onClear: () -> Unit) {
                     if (ui.phase == PeakPhase.REST) DeloadGreen else MaterialTheme.colorScheme.primary,
                 )
                 val names = ui.allExercises.filter { it.id in s.peakIds }.map { it.name }
+                val disc = s.discipline
                 Text(
-                    if (names.isEmpty()) "Пиковые упражнения не выбраны" else "Пик: " + names.joinToString(", "),
+                    when {
+                        disc != null -> "Соревнования: ${disc.title}"
+                        names.isEmpty() -> "Пиковые упражнения не выбраны"
+                        else -> "Пик: " + names.joinToString(", ")
+                    },
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -517,27 +532,40 @@ private fun PeakCard(ui: HomeUiState, onEdit: () -> Unit, onClear: () -> Unit) {
     }
 }
 
-/** Дата старта + чекбоксы пиковых упражнений. */
+/**
+ * Выход на пик: три вкладки, выбор только внутри одной.
+ * «Соревнования» — дисциплина с нормативами, «Рекорды» — свои упражнения на максимум, «Выносливость» — бег (позже).
+ */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun PeakDialog(
-    initialDay: Long?,
-    initialIds: Set<Long>,
-    initialBodyWeight: Float?,
+    settings: SettingsEntity,
     exercises: List<ExerciseEntity>,
     dayNames: Map<Long, String>,
+    estimate: suspend (Discipline, Float?) -> Competition.Estimate?,
     onDismiss: () -> Unit,
-    onSave: (Long, Set<Long>, Float?) -> Unit,
+    onSaveRecords: (Long, Set<Long>, Float?) -> Unit,
+    onSaveCompetition: (Long, String, Float?, Int?) -> Unit,
 ) {
+    val initialDay = settings.peakEpochDay
+    val initialIds = settings.peakIds
+    val wasComp = settings.peakMode == SettingsEntity.PEAK_COMPETITION
+    var tab by remember { mutableStateOf(if (wasComp || initialDay == null) 0 else 1) }
     var day by remember { mutableStateOf<Long?>(initialDay) }
-    var bw by remember { mutableStateOf(initialBodyWeight?.let { Fmt.step(it) } ?: "") }
-    var ids by remember { mutableStateOf(initialIds) }
+    var bw by remember { mutableStateOf(settings.bodyWeightKg?.let { Fmt.step(it) } ?: "") }
+    var year by remember { mutableStateOf(settings.birthYear?.toString() ?: "") }
+    var ids by remember { mutableStateOf(if (wasComp) emptySet() else initialIds) }
+    var discId by remember { mutableStateOf(if (wasComp) settings.compDiscipline else null) }
+    var kind by remember { mutableStateOf(Discipline.byId(settings.compDiscipline)?.kind ?: CompKind.MAX) }
     var picking by remember { mutableStateOf(false) }
     val today = LocalDate.now().toEpochDay()
     val minDay = today + Peaking.MIN_SPAN
     // Уже выставленную дату можно оставить, новую — не ближе 7 дней
     val d = day
-    val dayOk = d != null && (d >= minDay || d == initialDay && initialIds.isNotEmpty())
+    val dayOk = d != null && (d >= minDay || d == initialDay && initialDay != null)
+    val bwValue = bw.replace(',', '.').toFloatOrNull()?.takeIf { it > 0f }
+    val yearValue = year.toIntOrNull()?.takeIf { it in 1920..LocalDate.now().year }
+    val age = yearValue?.let { LocalDate.now().year - it }
 
     if (picking) {
         val state = androidx.compose.material3.rememberDatePickerState(
@@ -568,6 +596,22 @@ private fun PeakDialog(
                 Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
+                Row(
+                    Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    listOf("Соревнования", "Рекорды", "Выносливость").forEachIndexed { i, t ->
+                        androidx.compose.material3.FilterChip(selected = tab == i, onClick = { tab = i }, label = { Text(t) })
+                    }
+                }
+                if (tab == 2) {
+                    Text(
+                        "Бег: подготовка к дистанции и целевому времени — следующий этап. Пока выбрать нельзя.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    return@Column
+                }
                 OutlinedButton(onClick = { picking = true }, modifier = Modifier.fillMaxWidth()) {
                     Text(if (d == null) "Выбрать дату" else "Дата: " + LocalDate.ofEpochDay(d).format(peakDateFmt))
                 }
@@ -587,44 +631,149 @@ private fun PeakDialog(
                     onValueChange = { bw = it },
                     label = { Text("Свой вес, кг") },
                     singleLine = true,
-                    isError = bw.isNotBlank() && bw.replace(',', '.').toFloatOrNull() == null,
+                    isError = bw.isNotBlank() && bwValue == null,
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                         keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal,
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text(
-                    "Упражнения для выхода на пик (остальные — фоновые):",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 6.dp),
+                if (tab == 1) {
+                    Text(
+                        "Упражнения для выхода на пик (остальные — фоновые):",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                    var lastDay: Long? = null
+                    exercises.forEach { e ->
+                        if (e.dayId != lastDay) {
+                            lastDay = e.dayId
+                            Text(
+                                dayNames[e.dayId].orEmpty(),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            androidx.compose.material3.Checkbox(
+                                checked = e.id in ids,
+                                onCheckedChange = { on -> ids = if (on) ids + e.id else ids - e.id },
+                            )
+                            Text(e.name, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    return@Column
+                }
+                // ----- Соревнования -----
+                androidx.compose.material3.OutlinedTextField(
+                    value = year,
+                    onValueChange = { year = it.filter(Char::isDigit).take(4) },
+                    label = { Text("Год рождения") },
+                    singleLine = true,
+                    isError = year.isNotBlank() && yearValue == null,
+                    supportingText = { Text(if (age == null) "Без года показаны все дивизионы" else "Возраст в этом году: $age") },
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                var lastDay: Long? = null
-                exercises.forEach { e ->
-                    if (e.dayId != lastDay) {
-                        lastDay = e.dayId
-                        Text(
-                            dayNames[e.dayId].orEmpty(),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = 6.dp),
-                        )
+                Row(
+                    Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    CompKind.entries.forEach { k ->
+                        androidx.compose.material3.FilterChip(selected = kind == k, onClick = { kind = k }, label = { Text(k.title) })
                     }
+                }
+                Discipline.all.filter { it.kind == kind && it.fits(age) }.forEach { disc ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        androidx.compose.material3.Checkbox(
-                            checked = e.id in ids,
-                            onCheckedChange = { on -> ids = if (on) ids + e.id else ids - e.id },
-                        )
-                        Text(e.name, style = MaterialTheme.typography.bodyMedium)
+                        androidx.compose.material3.RadioButton(selected = discId == disc.id, onClick = { discId = disc.id })
+                        Column(Modifier.weight(1f)) {
+                            Text(disc.title, style = MaterialTheme.typography.bodyMedium)
+                            val div = disc.divisions.filter { it != ru.streetlift.tracker.domain.Division.ALL }
+                            Text(
+                                (disc.table?.federation ?: "без нормативов") +
+                                    if (div.isNotEmpty()) " · " + div.joinToString(", ") { it.title } else "",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
+                }
+                val disc = Discipline.byId(discId)?.takeIf { it.kind == kind }
+                if (disc != null) {
+                    CompInfo(disc, bwValue, estimate)
                 }
             }
         },
         confirmButton = {
+            val ok = dayOk && when (tab) {
+                0 -> Discipline.byId(discId)?.kind == kind
+                1 -> true
+                else -> false
+            }
             TextButton(
-                onClick = { if (d != null) onSave(d, ids, bw.replace(',', '.').toFloatOrNull()?.takeIf { it > 0f }) },
-                enabled = dayOk,
+                onClick = {
+                    if (d == null) return@TextButton
+                    if (tab == 0) discId?.let { onSaveCompetition(d, it, bwValue, yearValue) } else onSaveRecords(d, ids, bwValue)
+                },
+                enabled = ok,
             ) { Text("Сохранить") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
     )
+}
+
+/** Оценка результата в дисциплине и нормативы своей весовой категории. */
+@Composable
+private fun CompInfo(disc: Discipline, bodyWeight: Float?, estimate: suspend (Discipline, Float?) -> Competition.Estimate?) {
+    val est by androidx.compose.runtime.produceState<Competition.Estimate?>(null, disc.id, bodyWeight) {
+        value = estimate(disc, bodyWeight)
+    }
+    Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        if (bodyWeight == null) {
+            Text("Укажите свой вес — по нему считаются оценка и весовая категория.", style = MaterialTheme.typography.bodySmall, color = WarnOrange)
+            return@Column
+        }
+        val result = est?.result
+        val unit = disc.unit
+        fun fmt(v: Float) = if (disc.kind == CompKind.MAX) Fmt.weight(v) else "${v.toInt()} $unit"
+        Text(
+            if (result == null) "Сейчас: оценить не по чему — нет подходов за последние 8 недель"
+            else "Сейчас примерно: ${fmt(result)} (оценка по тренировкам за 8 недель)",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        if (disc.isTotal) {
+            est?.lifts?.forEach { l ->
+                val v = if (disc.kind == CompKind.MAX) l.maxAdded?.let { Fmt.weight(it) } else l.reps?.let { "$it $unit" }
+                Text("· ${l.lift.short}: ${v ?: "нет данных"}", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        val table = disc.table
+        if (table == null) {
+            Text("Нормативов для этой дисциплины нет — только цель и прогноз.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            return@Column
+        }
+        val row = table.rowFor(bodyWeight)
+        if (result != null) {
+            val (done, next) = table.evaluate(bodyWeight, result)
+            Text(
+                (done?.let { "Разряд: ${it.first.title}" } ?: "Разряд пока не выполнен") +
+                    (next?.let { n -> " · до ${n.first.title}: ещё ${fmt(n.second - result).let { if (disc.kind == CompKind.MAX) it else it }}" } ?: ""),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Text("Нормативы, ${table.label(row)} (${table.federation}, проверено ${ru.streetlift.tracker.domain.Standards.CHECKED}):", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 4.dp))
+        Text(
+            table.ranks.zip(row.values).filter { it.second != null }
+                .joinToString(" · ") { (r, v) -> "${r.title} ${if (disc.kind == CompKind.MAX) Fmt.step(v!!) else v!!.toInt().toString()}" },
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
+            "Оценка приблизительная: по формуле из ваших подходов (вес, повторы, запас). Точнее всего по тяжёлым подходам на 1–6 повторов и с соревновательным весом.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }

@@ -61,10 +61,34 @@ data class SettingsEntity(
     val remindLateMin: Int = 21 * 60,
     /** День выбран вручную (выбор/пропуск) — автоматический выбор дня на пике не вмешивается. */
     val manualDay: Boolean = false,
+    /** Год рождения — для дивизионов соревнований (v24). */
+    val birthYear: Int? = null,
+    /** Выход на пик: RECORDS — личные рекорды, COMPETITION — соревновательная дисциплина. */
+    val peakMode: String = PEAK_RECORDS,
+    /** Соревнования: id дисциплины и снимок оценок для плана (Competition.encode). */
+    val compDiscipline: String? = null,
+    val compPlan: String = "",
 ) {
     companion object {
         /** Плановая разгрузка всегда на 5-м цикле (у задней дельты — 9-я и 10-я тренировки). */
         const val DELOAD_EVERY = 5
+        const val PEAK_RECORDS = "RECORDS"
+        const val PEAK_COMPETITION = "COMPETITION"
+    }
+
+    /** Возраст в этом году (по году рождения). */
+    fun age(year: Int): Int? = birthYear?.let { year - it }
+
+    val discipline: ru.streetlift.tracker.domain.Discipline?
+        get() = if (peakMode == PEAK_COMPETITION) ru.streetlift.tracker.domain.Discipline.byId(compDiscipline) else null
+
+    /** Что нужно плану пикового упражнения на соревнованиях (null — не соревнования или не из дисциплины). */
+    fun compTarget(exerciseId: Long, exerciseName: String): ru.streetlift.tracker.domain.Competition.Target? {
+        val d = discipline ?: return null
+        val i = d.lifts.indexOfFirst { it.exerciseName == exerciseName }
+        if (i < 0) return null
+        val snap = ru.streetlift.tracker.domain.Competition.decode(compPlan)[exerciseId]
+        return ru.streetlift.tracker.domain.Competition.Target(d.kind, d.weights.getOrNull(i) ?: 0f, snap?.e1rm, snap?.reps, bodyWeightKg)
     }
 
     /** Сколько дней прошло после запланированной даты тренировки (0 — не пропущено). */

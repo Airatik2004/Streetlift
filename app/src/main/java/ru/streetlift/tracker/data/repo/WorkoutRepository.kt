@@ -209,12 +209,81 @@ class WorkoutRepository(private val db: AppDatabase) {
                 else (epochDay - today()).toInt().coerceIn(Peaking.MIN_SPAN, Peaking.FULL_SPAN),
                 peakExerciseIds = exerciseIds.joinToString(","),
                 bodyWeightKg = bodyWeightKg ?: getSettings().bodyWeightKg,
+                peakMode = SettingsEntity.PEAK_RECORDS, compDiscipline = null, compPlan = "",
             ),
         )
     }
 
     suspend fun clearPeak() {
-        settingsDao.upsert(getSettings().copy(peakEpochDay = null, peakExerciseIds = "", peakSpanDays = null))
+        settingsDao.upsert(
+            getSettings().copy(
+                peakEpochDay = null, peakExerciseIds = "", peakSpanDays = null,
+                peakMode = SettingsEntity.PEAK_RECORDS, compDiscipline = null, compPlan = "",
+            ),
+        )
+    }
+
+    suspend fun setBirthYear(year: Int?) {
+        settingsDao.upsert(getSettings().copy(birthYear = year))
+    }
+
+    // ---------------- Соревнования ----------------
+
+    /** Подходы упражнения за последние недели (завершённые тренировки) — для оценки результата. */
+    private suspend fun liftSets(names: Set<String>): Map<String, List<ru.streetlift.tracker.domain.Competition.LiftSet>> {
+        val since = System.currentTimeMillis() - ru.streetlift.tracker.domain.Competition.HISTORY_DAYS * 86_400_000L
+        val finished = sessionDao.getAllSessions().filter { it.finishedAt != null }.map { it.id }.toSet()
+        return sessionDao.getAllSets()
+            .filter { it.sessionId in finished && it.loggedAt >= since && it.exerciseName in names && !it.isSeconds }
+            .groupBy { it.exerciseName }
+            .mapValues { (_, v) -> v.map { ru.streetlift.tracker.domain.Competition.LiftSet(it.weightKg, it.reps, it.rir) } }
+    }
+
+    /** Оценка текущего результата в дисциплине (null — свой вес не указан). */
+    suspend fun competitionEstimate(d: ru.streetlift.tracker.domain.Discipline, bodyWeight: Float?): ru.streetlift.tracker.domain.Competition.Estimate? {
+        val bw = bodyWeight?.takeIf { it > 0f } ?: return null
+        val sets = liftSets(d.lifts.map { it.exerciseName }.toSet())
+        return ru.streetlift.tracker.domain.Competition.estimate(d, bw, d.lifts.associateWith { sets[it.exerciseName].orEmpty() })
+    }
+
+    /** Снимок оценок по упражнениям дисциплины для плана пика. */
+    private suspend fun competitionSnapshot(d: ru.streetlift.tracker.domain.Discipline, bodyWeight: Float?): String {
+        val est = competitionEstimate(d, bodyWeight) ?: return ""
+        val byName = programDao.getAllExercises().associateBy { it.name }
+        return ru.streetlift.tracker.domain.Competition.encode(
+            est.lifts.mapNotNull { l ->
+                byName[l.lift.exerciseName]?.let { ru.streetlift.tracker.domain.Competition.Snap(it.id, l.e1rm, l.reps) }
+            },
+        )
+    }
+
+    /** Выход на пик к соревнованиям: дата, дисциплина, свой вес и год рождения. */
+    suspend fun setCompetitionPeak(epochDay: Long, disciplineId: String, bodyWeightKg: Float?, birthYear: Int?) {
+        val d = ru.streetlift.tracker.domain.Discipline.byId(disciplineId) ?: return
+        val cur = getSettings()
+        val bw = bodyWeightKg ?: cur.bodyWeightKg
+        val names = d.lifts.map { it.exerciseName }.toSet()
+        val ids = programDao.getAllExercises().filter { it.name in names }.map { it.id }.toSet()
+        settingsDao.upsert(
+            cur.copy(
+                peakEpochDay = epochDay,
+                peakSpanDays = if (cur.peakEpochDay == epochDay && cur.peakSpanDays != null) cur.peakSpanDays
+                else (epochDay - today()).toInt().coerceIn(Peaking.MIN_SPAN, Peaking.FULL_SPAN),
+                peakExerciseIds = ids.joinToString(","),
+                bodyWeightKg = bw,
+                birthYear = birthYear ?: cur.birthYear,
+                peakMode = SettingsEntity.PEAK_COMPETITION,
+                compDiscipline = d.id,
+                compPlan = competitionSnapshot(d, bw),
+            ),
+        )
+    }
+
+    /** Обновить снимок оценок соревновательного пика (после тренировки). */
+    suspend fun refreshCompetitionPlan() {
+        val s = getSettings()
+        val d = s.discipline ?: return
+        settingsDao.upsert(s.copy(compPlan = competitionSnapshot(d, s.bodyWeightKg)))
     }
 
     /**
@@ -236,7 +305,10 @@ class WorkoutRepository(private val db: AppDatabase) {
             syncShared(recalibrate)
         }
         settingsDao.upsert(
-            s.copy(peakEpochDay = null, peakExerciseIds = "", peakSpanDays = null, cycleInMeso = 1, deloadOverride = DeloadOverride.AUTO, mesoIndex = s.mesoIndex + 1),
+            s.copy(
+                peakEpochDay = null, peakExerciseIds = "", peakSpanDays = null, cycleInMeso = 1, deloadOverride = DeloadOverride.AUTO,
+                mesoIndex = s.mesoIndex + 1, peakMode = SettingsEntity.PEAK_RECORDS, compDiscipline = null, compPlan = "",
+            ),
         )
     }
 
@@ -396,6 +468,8 @@ class WorkoutRepository(private val db: AppDatabase) {
         }
         val summary = lines.joinToString("\n")
         sessionDao.updateSession(session.copy(finishedAt = System.currentTimeMillis(), summary = summary, rollback = rollback))
+        // Соревнования: оценка обновляется после каждой тренировки — план пика по свежим данным
+        runCatching { refreshCompetitionPlan() }
         summary
     }
 

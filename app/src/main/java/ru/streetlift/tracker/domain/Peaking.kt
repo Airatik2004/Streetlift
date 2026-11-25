@@ -115,7 +115,12 @@ object Peaking {
         phase: PeakPhase,
         isPeakTarget: Boolean,
         bodyWeight: Float? = null,
+        /** Выход на пик к соревнованиям: своя схема для упражнений дисциплины. */
+        comp: Competition.Target? = null,
     ): SessionPlan? {
+        if (comp != null && isPeakTarget && phase != PeakPhase.NONE && state.mode != ExerciseMode.CALIBRATION) {
+            Competition.sessionPlan(comp, phase, config.scale)?.let { return it }
+        }
         val plan = resolveReps(config, state, type, globalDeload, phase, isPeakTarget, bodyWeight) ?: return null
         // Статика: диапазоны повторов пика (3–5, 2–4…) не подходят — секунды берём из коридора упражнения,
         // в тонусе — минимум коридора

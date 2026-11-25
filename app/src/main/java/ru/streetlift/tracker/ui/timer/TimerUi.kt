@@ -376,7 +376,7 @@ private fun ModeSettings(mode: Int, prefs: TimerPrefs.Prefs, update: (TimerPrefs
                 update(prefs.copy(stopwatchBeepEvery = it))
             }
             Text(
-                "Эти же настройки — у секундомера статики на тренировке.",
+                "Задержка старта — общая с секундомером статики на тренировке.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

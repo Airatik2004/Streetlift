@@ -101,6 +101,11 @@ class StatsViewModel(private val repo: WorkoutRepository) : ViewModel() {
     }.combine(repo.stages) { u, st -> u.copy(stages = st) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StatsUi())
 
+    val settings: StateFlow<ru.streetlift.tracker.data.db.SettingsEntity?> =
+        repo.settings.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    fun setBodyWeight(kg: Float?) = viewModelScope.launch { repo.setBodyWeight(kg) }
+    suspend fun forecast(name: String, stage: String?, target: Long, bw: Float) = repo.forecast(name, stage, target, bw)
+
     fun addManual(r: ManualRecordEntity) = viewModelScope.launch { repo.addManualRecord(r) }
     fun deleteManual(id: Long) = viewModelScope.launch { repo.deleteManualRecord(id) }
     fun deleteRun(id: Long) = viewModelScope.launch { repo.deleteRun(id) }
@@ -160,6 +165,8 @@ fun StatsScreen(repo: WorkoutRepository) {
                                 onRange = { f, t -> from = f; to = t },
                                 onOpenSession = { focus = it; tab = 0 },
                             )
+                            val e = ui.entries.firstOrNull { it.name == sel }
+                            if (e == null || (!e.isSeconds && !e.isHeight)) ForecastCard(vm, sel, selStage)
                         }
                     }
                 }
@@ -899,5 +906,87 @@ private fun XYChart(
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(top = 4.dp),
         )
+    }
+}
+
+/** Прогноз к дате: куда ведёт текущий темп. На план не влияет. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ForecastCard(vm: StatsViewModel, name: String, stage: String?) {
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val bw = settings?.bodyWeightKg
+    val today = LocalDate.now().toEpochDay()
+    var target by rememberSaveable { mutableStateOf(today + 56) }
+    var picking by remember { mutableStateOf(false) }
+    var bwText by remember(bw) { mutableStateOf(bw?.let { Fmt.step(it) } ?: "") }
+    val result by androidx.compose.runtime.produceState<ru.streetlift.tracker.domain.Forecast.Result?>(null, name, stage, target, bw) {
+        value = bw?.let { vm.forecast(name, stage, target, it) }
+    }
+    if (picking) {
+        val state = androidx.compose.material3.rememberDatePickerState(
+            initialSelectedDateMillis = target * 86_400_000L,
+            selectableDates = object : androidx.compose.material3.SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                    val d = utcTimeMillis / 86_400_000L
+                    return d > today && d - today <= ru.streetlift.tracker.domain.Forecast.MAX_DAYS
+                }
+            },
+        )
+        androidx.compose.material3.DatePickerDialog(
+            onDismissRequest = { picking = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    state.selectedDateMillis?.let { target = it / 86_400_000L }
+                    picking = false
+                }) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { picking = false }) { Text("Отмена") } },
+        ) { androidx.compose.material3.DatePicker(state = state) }
+    }
+    androidx.compose.material3.Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Прогноз к дате", style = MaterialTheme.typography.titleSmall)
+            androidx.compose.material3.OutlinedButton(onClick = { picking = true }) {
+                Text(LocalDate.ofEpochDay(target).format(DateTimeFormatter.ofPattern("d MMMM yyyy", java.util.Locale.forLanguageTag("ru"))))
+            }
+            if (bw == null) {
+                Text("Нужен свой вес — максимум считается от полной нагрузки (свой вес + отягощение).", style = MaterialTheme.typography.bodySmall)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = bwText, onValueChange = { bwText = it }, label = { Text("Свой вес, кг") }, singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal),
+                    )
+                    TextButton(onClick = { bwText.replace(',', '.').toFloatOrNull()?.takeIf { it > 0f }?.let { vm.setBodyWeight(it) } }) { Text("OK") }
+                }
+                return@Column
+            }
+            val r = result
+            if (r == null) {
+                Text(
+                    "Мало данных: нужны подходы хотя бы за 3 разные недели за последние 12 недель${if (stage != null) " (на этой стадии)" else ""}.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                return@Column
+            }
+            fun added(v: Double) = Fmt.weight(ru.streetlift.tracker.domain.Competition.maxAdded(bw, v.toFloat()))
+            Text("Максимум на 1 раз сейчас ≈ ${added(r.now)}", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "К дате: ${added(r.mid)} (от ${added(r.low)} до ${added(r.high)})",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            val perWeek = r.perWeek
+            Text(
+                "Темп: ${if (perWeek >= 0) "+" else "−"}${Fmt.step(kotlin.math.abs(perWeek).toFloat())} кг полной нагрузки в неделю · по ${r.weeks} нед.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                "Это оценка по формуле из ваших подходов и тренду за 12 недель. Обновляется после каждой тренировки; на план не влияет.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }

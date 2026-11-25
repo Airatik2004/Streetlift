@@ -171,6 +171,7 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
     fun setCompetitionPeak(epochDay: Long, disc: String, bw: Float?, year: Int?) =
         viewModelScope.launch { repo.setCompetitionPeak(epochDay, disc, bw, year) }
     suspend fun estimate(d: Discipline, bw: Float?): Competition.Estimate? = repo.competitionEstimate(d, bw)
+    suspend fun compForecast(d: Discipline, bw: Float, target: Long) = repo.competitionForecast(d, bw, target)
 
     val runData: StateFlow<List<RunPlan.RunData>> = repo.runData.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     fun setRunPlan(dist: RunPlan.Dist, race: Long, goalSec: Int?, perWeek: Int) =
@@ -397,6 +398,7 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
             } else {
                 PeakCard(
                     ui = ui,
+                    forecast = vm::compForecast,
                     onEdit = { peakDialog = true },
                     onClear = { vm.clearPeak() },
                 )
@@ -509,7 +511,12 @@ fun plural(n: Int, one: String, few: String, many: String): String {
 private val peakDateFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.forLanguageTag("ru"))
 
 @Composable
-private fun PeakCard(ui: HomeUiState, onEdit: () -> Unit, onClear: () -> Unit) {
+private fun PeakCard(
+    ui: HomeUiState,
+    forecast: suspend (Discipline, Float, Long) -> Triple<Float, Float, Float>?,
+    onEdit: () -> Unit,
+    onClear: () -> Unit,
+) {
     val s = ui.settings
     val date = s.peakEpochDay
     Card(Modifier.fillMaxWidth()) {
@@ -543,6 +550,22 @@ private fun PeakCard(ui: HomeUiState, onEdit: () -> Unit, onClear: () -> Unit) {
                     },
                     style = MaterialTheme.typography.bodySmall,
                 )
+                // Соревнования: прогноз результата к старту по тренду
+                val bw = s.bodyWeightKg
+                if (disc != null && bw != null) {
+                    val f by androidx.compose.runtime.produceState<Triple<Float, Float, Float>?>(null, disc.id, bw, date) {
+                        value = forecast(disc, bw, date)
+                    }
+                    f?.let { (lo, mid, hi) ->
+                        fun v(x: Float) = if (disc.kind == CompKind.MAX) Fmt.weight(x) else "${x.toInt()}"
+                        val rank = disc.table?.evaluate(bw, mid)?.first?.first?.title
+                        Text(
+                            "Прогноз к старту: ${v(mid)} (${v(lo)}–${v(hi)})" + (rank?.let { " · разряд $it" } ?: ""),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = onEdit) { Text("Изменить") }
                     TextButton(onClick = onClear) { Text("Сбросить") }

@@ -283,6 +283,47 @@ class WorkoutRepository(private val db: AppDatabase) {
         )
     }
 
+    // ---------------- Прогноз в силовых ----------------
+
+    suspend fun setBodyWeight(kg: Float?) {
+        settingsDao.upsert(getSettings().copy(bodyWeightKg = kg))
+    }
+
+    /** Оценочные максимумы полной нагрузки по подходам упражнения (стадия — если задана) за 12 недель. */
+    private suspend fun e1rmPoints(name: String, stage: String?, bodyWeight: Float): List<ru.streetlift.tracker.domain.Forecast.Pt> {
+        val since = System.currentTimeMillis() - ru.streetlift.tracker.domain.Forecast.WINDOW_DAYS * 86_400_000L
+        val finished = sessionDao.getAllSessions().filter { it.finishedAt != null }.map { it.id }.toSet()
+        val zone = java.time.ZoneId.systemDefault()
+        return sessionDao.getAllSets()
+            .filter { it.sessionId in finished && it.exerciseName == name && it.loggedAt >= since && !it.isSeconds && it.reps > 0 }
+            .filter { stage == null || it.leverageStage == stage }
+            .map {
+                ru.streetlift.tracker.domain.Forecast.Pt(
+                    java.time.Instant.ofEpochMilli(it.loggedAt).atZone(zone).toLocalDate().toEpochDay(),
+                    ru.streetlift.tracker.domain.Competition.e1rm(bodyWeight, ru.streetlift.tracker.domain.Competition.LiftSet(it.weightKg, it.reps, it.rir)).toDouble(),
+                )
+            }
+    }
+
+    /** Прогноз максимума полной нагрузки к дате (null — мало данных или дальше года). */
+    suspend fun forecast(name: String, stage: String?, target: Long, bodyWeight: Float): ru.streetlift.tracker.domain.Forecast.Result? =
+        ru.streetlift.tracker.domain.Forecast.of(e1rmPoints(name, stage, bodyWeight), today(), target)
+
+    /** Прогноз результата в соревновательной дисциплине к дате: (осторожный, средний, смелый). */
+    suspend fun competitionForecast(d: ru.streetlift.tracker.domain.Discipline, bodyWeight: Float, target: Long): Triple<Float, Float, Float>? {
+        val per = d.lifts.mapIndexed { i, lift ->
+            val f = forecast(lift.exerciseName, null, target, bodyWeight) ?: return null
+            val w = d.weights.getOrNull(i) ?: 0f
+            fun res(e: Double): Float = if (d.kind == ru.streetlift.tracker.domain.CompKind.MAX) {
+                ru.streetlift.tracker.domain.Competition.maxAdded(bodyWeight, e.toFloat())
+            } else {
+                (ru.streetlift.tracker.domain.Competition.repsAt(bodyWeight, w, e.toFloat(), emptyList()) ?: 0).toFloat()
+            }
+            Triple(res(f.low), res(f.mid), res(f.high))
+        }
+        return Triple(per.sumOf { it.first.toDouble() }.toFloat(), per.sumOf { it.second.toDouble() }.toFloat(), per.sumOf { it.third.toDouble() }.toFloat())
+    }
+
     // ---------------- Бег: подготовка к забегу ----------------
 
     /** Пробежки для плана: день, дистанция, лучшие отрезки. */

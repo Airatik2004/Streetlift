@@ -169,7 +169,8 @@ fun HistoryScreen(repo: WorkoutRepository, focusSessionId: Long? = null, onFocus
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Бэкап базы (JSON)", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "Цикл, веса, прогресс плана и вся история. Импорт полностью заменяет текущие данные.",
+                        "Цикл, веса, прогресс плана и вся история. Импорт полностью заменяет текущие данные. " +
+                            "Автокопии — в «Загрузки/StreetLift» после каждой тренировки и пробежки, хранятся последние ${ru.streetlift.tracker.data.backup.AutoBackup.KEEP}.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

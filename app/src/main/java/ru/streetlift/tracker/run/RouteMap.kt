@@ -88,7 +88,7 @@ fun RouteMap(
             colored.forEach { (pts, color) ->
                 m.overlays.add(
                     Polyline(m).apply {
-                        setPoints(pts.map { GeoPoint(it.lat, it.lon) })
+                        setPoints(smoothLine(pts))
                         outlinePaint.color = color
                         outlinePaint.strokeWidth = 12f
                         outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
@@ -98,7 +98,7 @@ fun RouteMap(
         } else segments.filter { it.size >= 2 }.forEach { seg ->
             m.overlays.add(
                 Polyline(m).apply {
-                    setPoints(seg.map { GeoPoint(it.lat, it.lon) })
+                    setPoints(smoothLine(seg))
                     outlinePaint.color = 0xFF2196F3.toInt()
                     outlinePaint.strokeWidth = 12f
                     outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
@@ -135,6 +135,20 @@ fun RouteMap(
  * Куски маршрута ~50 м с цветом по темпу (зелёный — быстрее, красный — медленнее,
  * шкала по 10–90 перцентилям пробежки). null — у маршрута нет времени точек.
  */
+/**
+ * Сглаживание линии на карте (только отрисовка, дистанция и темп считаются по сырым точкам):
+ * скользящее среднее по 5 точкам, концы на месте — убирает зигзаги от дрожания GPS.
+ */
+private fun smoothLine(p: List<RunTracker.Pt>, k: Int = 2): List<GeoPoint> = p.indices.map { i ->
+    if (i == 0 || i == p.lastIndex || p.size < 5) GeoPoint(p[i].lat, p[i].lon)
+    else {
+        val from = maxOf(0, i - k)
+        val to = minOf(p.lastIndex, i + k)
+        val w = p.subList(from, to + 1)
+        GeoPoint(w.sumOf { it.lat } / w.size, w.sumOf { it.lon } / w.size)
+    }
+}
+
 private fun paceChunks(segments: List<List<RunTracker.Pt>>): List<Pair<List<RunTracker.Pt>, Int>>? {
     val chunks = ArrayList<Pair<List<RunTracker.Pt>, Double>>()
     segments.forEach { seg ->

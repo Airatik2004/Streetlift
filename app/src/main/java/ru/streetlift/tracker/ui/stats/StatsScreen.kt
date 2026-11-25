@@ -277,6 +277,7 @@ private fun AddRecordDialog(
     var value by remember(name) { mutableIntStateOf(ex?.minReps ?: 5) }
     val today = LocalDate.now().toEpochDay()
     var date by remember { mutableLongStateOf(today) }
+    var side by remember(name) { mutableStateOf("L") }
     var picking by remember { mutableStateOf(false) }
 
     if (picking) {
@@ -309,6 +310,10 @@ private fun AddRecordDialog(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 ChipRow(ui.exercises.map { it.name }, name) { name = it }
+                // Односторонние: рекорд записывается на сторону
+                if (ex?.unilateral == true) {
+                    ChipRow(listOf("Левая", "Правая"), if (side == "R") "Правая" else "Левая") { side = if (it == "Правая") "R" else "L" }
+                }
                 if (ex?.stageGroup != null) {
                     StagePicker(
                         stages = ui.stages.filter { it.groupKey == ex.stageGroup },
@@ -339,6 +344,7 @@ private fun AddRecordDialog(
                             value = value,
                             isSeconds = ex?.isSeconds == true,
                             epochDay = date,
+                            side = side.takeIf { ex?.unilateral == true },
                         ),
                     )
                 },

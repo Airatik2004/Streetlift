@@ -179,8 +179,10 @@ object RunPlan {
     /**
      * План с [start] (включительно) до старта [race]: по неделям, [runs] пробежек в неделю.
      * Объём растёт ~8% в неделю от [baseKm], каждая 4-я неделя легче, перед стартом снижение.
+     * [strength] — силовые дни (день → номер дня программы, 0 — День 1 с ногами): интервалы и темп
+     * не ставятся в День 1 и накануне, длинная — не в силовой день (если в неделе есть выбор).
      */
-    fun build(start: Long, race: Long, d: Dist, runs: Int, baseKm: Double): List<Item> {
+    fun build(start: Long, race: Long, d: Dist, runs: Int, baseKm: Double, strength: Map<Long, Int> = emptyMap()): List<Item> {
         val r = runs.coerceIn(1, 7)
         val items = mutableListOf<Item>()
         val totalDays = race - start
@@ -201,13 +203,32 @@ object RunPlan {
             val offsets = (0 until r).map { (it * 7.0 / r).roundToInt() }.distinct()
             val days = offsets.map { weekStart + it }.filter { it < race - 1 || (it < race && r == 1) }
             if (days.isEmpty()) continue
-            // Роли: длинная — последний день недели, качество — в середине (при 5+ — ещё одна)
-            val longDay = if (days.size >= 2) days.last() else null
-            val q1 = if (days.size >= 3) days[days.size / 2 - (if (days.size % 2 == 0) 1 else 0)] else null
-            // Второе качество — подальше от первого и от длинных (своей и прошлой недели)
+            // Роли с учётом силовых: длинная — не в силовой день; качество — не в День 1 и не накануне;
+            // при прочих равных длинная ближе к концу недели, качество — в середине
+            fun strengthPenalty(day: Long, quality: Boolean): Int {
+                val pos = strength[day]
+                val beforeLegs = strength[day + 1] == 0
+                return when {
+                    quality && pos == 0 -> 5
+                    quality && beforeLegs -> 4
+                    quality && pos != null -> 1
+                    !quality && pos != null -> 3
+                    !quality && beforeLegs -> 1
+                    else -> 0
+                }
+            }
+            val longDay = if (days.size >= 2) days.withIndex().minByOrNull { (i, dd) -> strengthPenalty(dd, false) * 10 + (days.size - 1 - i) }?.value else null
+            val mid = days.size / 2
+            val q1 = if (days.size >= 3) days.withIndex().filter { it.value != longDay }.minByOrNull { (i, dd) ->
+                strengthPenalty(dd, true) * 10 + (if (longDay != null && kotlin.math.abs(dd - longDay) <= 1) 6 else 0) + kotlin.math.abs(i - mid)
+            }?.value else null
+            // Второе качество — подальше от первого и от длинной
             val q2 = if (days.size >= 5 && q1 != null) {
-                days.filter { it != longDay && it != q1 }.maxByOrNull { dd ->
-                    minOf(kotlin.math.abs(dd - q1), (longDay ?: dd + 7) - dd, dd - (weekStart - 1))
+                days.filter { it != longDay && it != q1 }.minByOrNull { dd ->
+                    val gapQ = kotlin.math.abs(dd - q1)
+                    val gapLong = if (longDay != null) kotlin.math.abs(longDay - dd) else 7L
+                    val gapPrev = dd - (weekStart - 1)
+                    strengthPenalty(dd, true) * 10 - minOf(gapQ, gapLong, gapPrev).toInt()
                 }
             } else null
             val longKm = if (longDay != null) min(v * 0.3, d.longCapKm).coerceAtLeast(4.0) else 0.0

@@ -94,12 +94,25 @@ data class SettingsEntity(
 
     val runDist: ru.streetlift.tracker.domain.RunPlan.Dist? get() = ru.streetlift.tracker.domain.RunPlan.Dist.byM(runDistM)
 
+    /**
+     * Ожидаемые силовые дни до [until]: ближайшая тренировка и дальше через день (день → номер дня программы).
+     * Прогноз: если тренировки сдвигаются, план бега подстраивается при следующем открытии.
+     */
+    fun strengthDays(until: Long): Map<Long, Int> {
+        val start = nextWorkoutEpochDay ?: return emptyMap()
+        return generateSequence(0) { it + 1 }.map { k -> start + 2L * k to (currentDayIndex + k) % 4 }
+            .takeWhile { it.first <= until }.toMap()
+    }
+
     /** План пробежек (пусто — подготовки нет). */
     fun runItems(): List<ru.streetlift.tracker.domain.RunPlan.Item> {
         val d = runDist ?: return emptyList()
         val race = runRace ?: return emptyList()
         if (!endurance) return emptyList()
-        return ru.streetlift.tracker.domain.RunPlan.build(runStart ?: race, race, d, runPerWeek ?: ru.streetlift.tracker.domain.RunPlan.DEFAULT_RUNS, (runBaseKm ?: 0f).toDouble())
+        return ru.streetlift.tracker.domain.RunPlan.build(
+            runStart ?: race, race, d, runPerWeek ?: ru.streetlift.tracker.domain.RunPlan.DEFAULT_RUNS, (runBaseKm ?: 0f).toDouble(),
+            strengthDays(race),
+        )
     }
 
     /** Полных лет на день [day] (по дате рождения). */
@@ -436,6 +449,8 @@ data class ManualRecordEntity(
     val value: Int,
     val isSeconds: Boolean = false,
     val epochDay: Long,
+    /** Сторона у односторонних: L / R (v27), null — обе / не важно. */
+    val side: String? = null,
 )
 
 /** Пробежка: время без пауз и маршрут («lat,lon;lat,lon|…», отрезки между паузами через «|»). */

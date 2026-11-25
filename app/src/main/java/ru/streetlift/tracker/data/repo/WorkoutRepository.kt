@@ -956,7 +956,11 @@ fun recordEntries(
         )
     } + manual.map {
         ru.streetlift.tracker.domain.Records.Entry(
-            name = it.exerciseName,
+            name = it.exerciseName + when (it.side) {
+                "L" -> " · левая"
+                "R" -> " · правая"
+                else -> ""
+            },
             stage = it.leverageStage,
             weight = it.weightKg,
             value = it.value,

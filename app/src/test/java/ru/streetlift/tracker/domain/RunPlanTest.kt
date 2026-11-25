@@ -79,4 +79,19 @@ class RunPlanTest {
         assertEquals(49.8, v, 0.5)
         assertNull(RunPlan.fitness(runs, 1100)) // старше 8 недель
     }
+
+    @Test
+    fun build_avoidsLegDayForQuality() {
+        val start = 20_000L
+        val race = start + 6 * 7
+        // Силовые через день, День 1 (ноги) — каждые 8 дней
+        val strength = (0 until 30).associate { k -> start + 2L * k to k % 4 }
+        val items = RunPlan.build(start, race, RunPlan.Dist.K10, 4, 25.0, strength)
+        val quality = items.filter { it.type == RunPlan.Type.INTERVALS || it.type == RunPlan.Type.TEMPO }
+        assertTrue(quality.isNotEmpty())
+        quality.forEach { q ->
+            assertFalse("качество в День 1: ${q.epochDay}", strength[q.epochDay] == 0)
+            assertFalse("качество накануне Дня 1: ${q.epochDay}", strength[q.epochDay + 1] == 0)
+        }
+    }
 }

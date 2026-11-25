@@ -56,7 +56,9 @@ object SignalPlayer {
             }
             order.firstNotNullOfOrNull { t -> outs.firstOrNull { it.type == t } }?.let { list += it }
         }
-        if (p.outSpeaker) outs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }?.let { list += it }
+        // Динамик: если включён, или если гарнитуры сейчас нет и включено «Без наушников — в динамик»
+        val toSpeaker = p.outSpeaker || (p.outBt && p.speakerFallback && list.isEmpty())
+        if (toSpeaker) outs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }?.let { list += it }
         return list
     }
 

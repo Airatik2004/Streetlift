@@ -20,7 +20,9 @@ object TimerPrefs {
         val vibration: Boolean = true,
         /** Куда выводить звук: Bluetooth-гарнитура и/или динамик телефона (независимо). */
         val outBt: Boolean = true,
-        val outSpeaker: Boolean = true,
+        val outSpeaker: Boolean = false,
+        /** Гарнитура не подключена — сигнал в динамик (имеет смысл при outBt и выключенном outSpeaker). */
+        val speakerFallback: Boolean = true,
         /** Короткие пики за 3, 2, 1 секунду до конца. */
         val countdownBeeps: Boolean = true,
         /** Секундомер (статика): задержка старта 0/3/5 с и пик каждые 0/5/10 с. */
@@ -74,7 +76,8 @@ object TimerPrefs {
             volume = p.getFloat("volume", 1f),
             vibration = p.getBoolean("vibrationOn", true),
             outBt = p.getBoolean("outBt", true),
-            outSpeaker = p.getBoolean("outSpeaker", true),
+            outSpeaker = p.getBoolean("outSpeaker", false),
+            speakerFallback = p.getBoolean("speakerFallback", true),
             countdownBeeps = p.getBoolean("countdownBeeps", true),
             stopwatchDelay = p.getInt("swDelay", 3),
             runCountdown = p.getInt("runCountdown", 5),
@@ -96,6 +99,7 @@ object TimerPrefs {
             .putBoolean("vibrationOn", prefs.vibration)
             .putBoolean("outBt", prefs.outBt)
             .putBoolean("outSpeaker", prefs.outSpeaker)
+            .putBoolean("speakerFallback", prefs.speakerFallback)
             .putBoolean("countdownBeeps", prefs.countdownBeeps)
             .putInt("swDelay", prefs.stopwatchDelay)
             .putInt("runCountdown", prefs.runCountdown)

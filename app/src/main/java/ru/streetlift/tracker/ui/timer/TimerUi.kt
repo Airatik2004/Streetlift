@@ -582,6 +582,19 @@ fun SignalSettingsCard(p: TimerPrefs.Prefs, update: (TimerPrefs.Prefs) -> Unit) 
                 Text("Динамик телефона", Modifier.weight(1f))
                 Switch(checked = p.outSpeaker, onCheckedChange = { update(p.copy(outSpeaker = it, soundEnabled = it || p.outBt)) })
             }
+            if (p.outBt && !p.outSpeaker) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Без наушников — в динамик")
+                        Text(
+                            "если гарнитура не подключена, звук пойдёт в динамик телефона",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = p.speakerFallback, onCheckedChange = { update(p.copy(speakerFallback = it)) })
+                }
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Вибрация", Modifier.weight(1f))
                 Switch(checked = p.vibration, onCheckedChange = { update(p.copy(vibration = it)) })

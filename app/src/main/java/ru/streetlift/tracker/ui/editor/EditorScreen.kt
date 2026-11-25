@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -690,7 +691,7 @@ private fun PastEntryView(day: DayEntity, en: PastEntry) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
         )
-        if (en.skipped) Tag("Пропущен", MaterialTheme.colorScheme.outline)
+        if (en.skipped) Box(Modifier.alpha(0.6f)) { Tag("Пропущен", MaterialTheme.colorScheme.outline) }
     }
     val list = en.exercises
     if (list == null) {
@@ -705,9 +706,10 @@ private fun PastEntryView(day: DayEntity, en: PastEntry) {
 /** Упражнение по плану прошлой тренировки (только просмотр). */
 @Composable
 private fun PastExerciseRow(e: ExerciseEntity, en: PastEntry) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+    // Приглушённо: прошедший день — только просмотр
+    Column(Modifier.fillMaxWidth().alpha(0.6f).padding(vertical = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(e.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+            Text(e.name, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
             if (e.mode == ExerciseMode.CALIBRATION) Tag("Калибровка", MaterialTheme.colorScheme.secondary)
             else if (en.isDeload || e.plannedDeload(en.deloadEvery, false)) Tag("Разгрузка", ru.streetlift.tracker.ui.theme.DeloadGreen)
         }
@@ -717,13 +719,13 @@ private fun PastExerciseRow(e: ExerciseEntity, en: PastEntry) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        e.leverageStage?.let { Text("Стадия: $it", style = MaterialTheme.typography.bodySmall) }
+        e.leverageStage?.let { Text("Стадия: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         if (e.mode != ExerciseMode.CALIBRATION) {
             Text(
                 if (e.isJump) "План: ${e.jumpState?.let { ru.streetlift.tracker.domain.Jumps.describe(it) } ?: "высота не задана"}"
                 else "План: ${Fmt.weight(e.weightKg)}, ${e.plannedSets} подх., цель ${e.targetReps}+${if (e.isSeconds) " с" else ""}",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

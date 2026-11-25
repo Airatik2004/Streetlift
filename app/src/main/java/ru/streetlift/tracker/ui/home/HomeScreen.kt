@@ -586,7 +586,6 @@ private fun PeakDialog(
                     value = bw,
                     onValueChange = { bw = it },
                     label = { Text("Свой вес, кг") },
-                    supportingText = { Text("для «~85%» от полной нагрузки (свой вес ± отягощение)") },
                     singleLine = true,
                     isError = bw.isNotBlank() && bw.replace(',', '.').toFloatOrNull() == null,
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(

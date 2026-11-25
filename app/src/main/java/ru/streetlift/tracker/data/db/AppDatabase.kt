@@ -20,7 +20,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RunEntity::class,
     ],
     version = 26,
-    exportSchema = false,
+    // Схемы версий — в app/schemas, по ним тест проверяет миграции
+    exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun settingsDao(): SettingsDao

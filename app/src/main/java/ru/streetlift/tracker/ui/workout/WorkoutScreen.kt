@@ -447,13 +447,17 @@ private fun WorkPanel(
     Text(cur.exercise.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
     // Подход N из M с −/+ в пределах коридора
     Row(verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = { onSets(-1) }, enabled = cur.plannedCount > cur.minCount) { Text("−", fontSize = 20.sp) }
+        val canLess = cur.plannedCount > cur.minCount
+        val canMore = cur.plannedCount < cur.maxCount
+        val less = ru.streetlift.tracker.ui.common.rememberRepeatClick(canLess) { onSets(-1) }
+        val more = ru.streetlift.tracker.ui.common.rememberRepeatClick(canMore) { onSets(1) }
+        TextButton(onClick = less.onClick, enabled = canLess, interactionSource = less.source) { Text("−", fontSize = 20.sp) }
         Text(
             "Подход ${ui.currentSetNumber} из ${cur.plannedCount}" + (if (ui.currentSide.isNotEmpty()) " · ${ui.currentSide}" else ""),
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.primary,
         )
-        TextButton(onClick = { onSets(1) }, enabled = cur.plannedCount < cur.maxCount) { Text("+", fontSize = 20.sp) }
+        TextButton(onClick = more.onClick, enabled = canMore, interactionSource = more.source) { Text("+", fontSize = 20.sp) }
     }
     Text(
         when {

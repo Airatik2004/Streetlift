@@ -18,6 +18,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,7 +62,8 @@ fun Stepper(
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            FilledTonalIconButton(onClick = onMinus) { Icon(Icons.Filled.Remove, contentDescription = "Меньше") }
+            val minus = rememberRepeatClick(onStep = onMinus)
+            FilledTonalIconButton(onClick = minus.onClick, interactionSource = minus.source) { Icon(Icons.Filled.Remove, contentDescription = "Меньше") }
             Text(
                 value,
                 style = MaterialTheme.typography.titleLarge,
@@ -71,7 +73,8 @@ fun Stepper(
                     .widthIn(min = 72.dp)
                     .let { if (onValueClick != null) it.clickable { onValueClick() } else it },
             )
-            FilledTonalIconButton(onClick = onPlus) { Icon(Icons.Filled.Add, contentDescription = "Больше") }
+            val plus = rememberRepeatClick(onStep = onPlus)
+            FilledTonalIconButton(onClick = plus.onClick, interactionSource = plus.source) { Icon(Icons.Filled.Add, contentDescription = "Больше") }
         }
         // Пояснение под значением (какие резины взять)
         sub?.let {
@@ -156,3 +159,67 @@ fun ConfirmDialog(
 /** «−15», «+2,5», «−1.25» → Float. Понимает минус-тире и запятую. */
 fun parseSignedFloat(s: String): Float? =
     s.trim().replace('−', '-').replace('–', '-').replace(',', '.').replace("+", "").toFloatOrNull()
+
+/**
+ * Автоповтор для кнопок −/+: короткое нажатие — один шаг; удержание 0,3 с — прокрутка
+ * 8 шагов/с, через 1,5 с прокрутки разгон до 20 шагов/с к 3 с удержания.
+ * Передать [RepeatClick.source] в interactionSource кнопки и [RepeatClick.onClick] в onClick.
+ */
+class RepeatClick(
+    val source: androidx.compose.foundation.interaction.MutableInteractionSource,
+    val onClick: () -> Unit,
+)
+
+object RepeatTiming {
+    const val START_MS = 300L
+    const val SLOW_MS = 125L
+    const val FAST_MS = 50L
+    /** Прокрутка идёт медленно столько, затем разгон до [FAST_MS] к 3 с удержания. */
+    const val SLOW_PHASE_MS = 1_500L
+    const val FULL_SPEED_AT_MS = 3_000L - START_MS
+
+    /** Пауза до следующего шага по времени от начала прокрутки. */
+    fun interval(repeatingMs: Long): Long = when {
+        repeatingMs <= SLOW_PHASE_MS -> SLOW_MS
+        repeatingMs >= FULL_SPEED_AT_MS -> FAST_MS
+        else -> {
+            val f = (repeatingMs - SLOW_PHASE_MS).toFloat() / (FULL_SPEED_AT_MS - SLOW_PHASE_MS)
+            (SLOW_MS - (SLOW_MS - FAST_MS) * f).toLong()
+        }
+    }
+}
+
+@Composable
+fun rememberRepeatClick(enabled: Boolean = true, onStep: () -> Unit): RepeatClick {
+    val source = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val step = androidx.compose.runtime.rememberUpdatedState(onStep)
+    val en = androidx.compose.runtime.rememberUpdatedState(enabled)
+    // Были шаги автоповтора — отпускание не добавляет ещё один шаг
+    val repeated = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    androidx.compose.runtime.LaunchedEffect(source) {
+        var job: kotlinx.coroutines.Job? = null
+        source.interactions.collect { i ->
+            when (i) {
+                is androidx.compose.foundation.interaction.PressInteraction.Press -> {
+                    job?.cancel()
+                    repeated.set(false)
+                    job = launch {
+                        kotlinx.coroutines.delay(RepeatTiming.START_MS)
+                        val t0 = android.os.SystemClock.uptimeMillis()
+                        while (en.value) {
+                            step.value()
+                            repeated.set(true)
+                            kotlinx.coroutines.delay(RepeatTiming.interval(android.os.SystemClock.uptimeMillis() - t0))
+                        }
+                    }
+                }
+                is androidx.compose.foundation.interaction.PressInteraction.Release -> job?.cancel()
+                is androidx.compose.foundation.interaction.PressInteraction.Cancel -> {
+                    job?.cancel()
+                    repeated.set(false)
+                }
+            }
+        }
+    }
+    return remember(source) { RepeatClick(source) { if (!repeated.getAndSet(false)) step.value() } }
+}

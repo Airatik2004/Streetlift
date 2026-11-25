@@ -534,9 +534,11 @@ private fun IntervalsPanel(iv: IntervalTimer.State, prefs: TimerPrefs.Prefs, upd
 private fun IntervalStepper(label: String, value: String, onDelta: (Int) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-        FilledTonalIconButton(onClick = { onDelta(-1) }) { Text("−") }
+        val minus = ru.streetlift.tracker.ui.common.rememberRepeatClick { onDelta(-1) }
+        FilledTonalIconButton(onClick = minus.onClick, interactionSource = minus.source) { Text("−") }
         Text(value, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 12.dp))
-        FilledTonalIconButton(onClick = { onDelta(1) }) { Text("+") }
+        val plus = ru.streetlift.tracker.ui.common.rememberRepeatClick { onDelta(1) }
+        FilledTonalIconButton(onClick = plus.onClick, interactionSource = plus.source) { Text("+") }
     }
 }
 

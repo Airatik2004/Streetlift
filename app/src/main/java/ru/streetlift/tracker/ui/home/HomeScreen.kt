@@ -1147,9 +1147,11 @@ private fun EnduranceTab(
     // Пробежек в неделю: сначала предлагается максимум, меньше — план и цель пересчитываются
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("Пробежек в неделю", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        TextButton(onClick = { onPerWeek((perWeek - 1).coerceAtLeast(1)) }) { Text("−") }
+        val less = ru.streetlift.tracker.ui.common.rememberRepeatClick { onPerWeek((perWeek - 1).coerceAtLeast(1)) }
+        val more = ru.streetlift.tracker.ui.common.rememberRepeatClick { onPerWeek((perWeek + 1).coerceAtMost(7)) }
+        TextButton(onClick = less.onClick, interactionSource = less.source) { Text("−") }
         Text("$perWeek", style = MaterialTheme.typography.titleMedium)
-        TextButton(onClick = { onPerWeek((perWeek + 1).coerceAtMost(7)) }) { Text("+") }
+        TextButton(onClick = more.onClick, interactionSource = more.source) { Text("+") }
     }
     androidx.compose.material3.OutlinedTextField(
         value = goal,

@@ -136,7 +136,7 @@ class WorkoutRepository(private val db: AppDatabase) {
 
     // ---------------- Тренировка ----------------
 
-    suspend fun startSession(dayId: Long): Long = db.withTransaction {
+    suspend fun startSession(dayId: Long, readiness: Int = 0): Long = db.withTransaction {
         sessionDao.getActive()?.let { return@withTransaction it.id }
         val s = getSettings()
         val day = programDao.getDay(dayId) ?: error("День не найден")
@@ -157,6 +157,7 @@ class WorkoutRepository(private val db: AppDatabase) {
                 priority = s.priority.name,
                 afterPause = afterPause,
                 cycleInMeso = s.cycleInMeso,
+                readiness = readiness.coerceIn(0, 2),
                 // День 1: пистолетики или прыжки — то, что делалось давнее; фиксируется на всю тренировку
                 altSlot = if (programDao.getExercisesForDay(day.id).any { it.altSlot != null }) {
                     ru.streetlift.tracker.data.db.nextAltSlot(sessionDao.getLastAlt())
@@ -478,11 +479,16 @@ class WorkoutRepository(private val db: AppDatabase) {
         if (peak != null) lines += "Выход на пик (${peak.title}) — рабочий план не меняется, результаты в истории."
         // Через цикл (пистолетики / прыжки): не участвовавшее в этой тренировке упражнение не трогаем
         if (s.endurance) lines += "Подготовка к забегу — силовые в поддержке, рабочий план не меняется."
+        when (session.readiness) {
+            READINESS_MID -> lines += "Самочувствие среднее — объём был меньше, это не считается спадом."
+            READINESS_BAD -> lines += "Самочувствие плохое — тренировка прошла как разгрузка, веса не меняются."
+        }
         val updated = if (peak != null || s.endurance) emptyList() else exercises.filter { it.activeInSlot(session.effectiveAltSlot) }.map { ex ->
             val exLogs = logs.filter { it.exerciseId == ex.id }
             // Своя плановая разгрузка упражнения (или общая принудительная) либо аварийная
             val planned = ex.plannedDeload(s.deloadEvery, session.isDeload)
-            val wasDeload = planned || ex.emergencyDeloadNext
+            // Плохое самочувствие — тренировка как разгрузка: веса и прогрессия не меняются
+            val wasDeload = planned || ex.emergencyDeloadNext || session.readiness == READINESS_BAD
             if (ex.isJump) {
                 // Прыжки: высота, вес и прыжки по своим правилам
                 val jl = exLogs.map { ru.streetlift.tracker.domain.Jumps.Log(it.heightCm ?: 0, it.weightKg, it.reps) }
@@ -500,9 +506,13 @@ class WorkoutRepository(private val db: AppDatabase) {
                 }
                 return@map (newState?.let { ex.withJump(it) } ?: ex).copy(deloadSessions = sessions, skipPlannedDeload = if (sessions == 0) null else ex.skipPlannedDeload)
             }
+            // Среднее самочувствие — подходов было на 1 меньше по плану, это не «спад»
+            val engineState = if (session.readiness == READINESS_MID && ex.mode == ExerciseMode.ACTIVE && !wasDeload) {
+                ex.toState().let { it.copy(plannedSets = (it.plannedSets - 1).coerceAtLeast(1)) }
+            } else ex.toState()
             val result = ProgressionEngine.computeNext(
                 ex.toConfig(),
-                ex.toState(),
+                engineState,
                 // Односторонние: подход засчитывается по слабой стороне (меньше повторов, тяжелее RIR)
                 if (ex.unilateral) {
                     exLogs.groupBy { it.setIndex }.toSortedMap().values.map { pair ->
@@ -969,4 +979,22 @@ fun recordEntries(
             manualId = it.id,
         )
     }
+}
+
+/** Самочувствие перед тренировкой. */
+const val READINESS_GOOD = 0
+const val READINESS_MID = 1
+const val READINESS_BAD = 2
+
+/**
+ * План упражнения с учётом самочувствия: средне — на подход меньше и запас +1,
+ * плохо — как разгрузка (подходов вдвое меньше, запас 3–4). Калибровку не трогаем.
+ */
+fun applyReadiness(plan: ru.streetlift.tracker.domain.SessionPlan, readiness: Int): ru.streetlift.tracker.domain.SessionPlan = when {
+    plan.isCalibration -> plan
+    readiness == READINESS_MID -> plan.copy(sets = (plan.sets - 1).coerceAtLeast(1), rirMin = plan.rirMin + 1, rirMax = plan.rirMax + 1)
+    readiness == READINESS_BAD -> plan.copy(
+        sets = ProgressionEngine.deloadSets(plan.sets), rirMin = maxOf(plan.rirMin, 3), rirMax = maxOf(plan.rirMax, 4), isDeload = true,
+    )
+    else -> plan
 }

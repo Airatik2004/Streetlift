@@ -206,6 +206,7 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                         }
                     }
                     ui.resting -> RestPanel(timer, ui)
+                    ui.warmup != null -> WarmupPanel(ui.warmup!!)
                     else -> WorkPanel(
                         ui = ui,
                         weight = weight, reps = reps, rir = rir, height = height,
@@ -230,6 +231,22 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth().background(bg).padding(vertical = 4.dp),
                     )
+                    is StepRow.Warmup -> Row(
+                        Modifier.fillMaxWidth().background(bg).padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "Разминка · ${row.block.exercise.name} ${row.index + 1}/${row.total}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            warmupText(row.set) + if (row.done) " ✓" else "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     is StepRow.Work -> {
                         val log = row.log
                         Row(
@@ -586,4 +603,26 @@ private fun sideLetter(s: String?) = when (s) {
     "L" -> "Л"
     "R" -> "П"
     else -> ""
+}
+
+/** «+10 кг × 3» / «45 см × 3». */
+private fun warmupText(w: ru.streetlift.tracker.domain.Warmup.WSet): String =
+    (w.heightCm?.let { "$it см · " } ?: "") + "${Fmt.weightValue(w.weightKg)} × ${w.reps}"
+
+/** Текущий разминочный подход: тем же движением, в историю не пишется. */
+@Composable
+private fun WarmupPanel(w: ru.streetlift.tracker.workout.WarmupStep) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    Text("Разминка ${w.index + 1} из ${w.total}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+    Text(w.block.exercise.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+    Spacer(Modifier.height(6.dp))
+    Text(warmupText(w.set), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+    Text(
+        "Легко, с большим запасом. В историю не записывается.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(10.dp))
+    Button(onClick = { ActiveWorkout.next(ctx) }, modifier = Modifier.fillMaxWidth()) { Text("Готово") }
+    TextButton(onClick = { ActiveWorkout.skipWarmup(w.block.exercise.id) }) { Text("Пропустить разминку") }
 }

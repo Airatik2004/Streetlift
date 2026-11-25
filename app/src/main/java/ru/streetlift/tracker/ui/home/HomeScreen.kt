@@ -155,9 +155,18 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
-    fun start(onStarted: (Long) -> Unit) {
+    /** Общая разгрузка на цикл и сразу старт (по порядку, чтобы тренировка уже была разгрузочной). */
+    fun startWithDeload(onStarted: (Long) -> Unit) {
         val day = state.value.nextDay ?: return
-        viewModelScope.launch { onStarted(repo.startSession(day.id)) }
+        viewModelScope.launch {
+            repo.setDeload(true)
+            onStarted(repo.startSession(day.id))
+        }
+    }
+
+    fun start(readiness: Int, onStarted: (Long) -> Unit) {
+        val day = state.value.nextDay ?: return
+        viewModelScope.launch { onStarted(repo.startSession(day.id, readiness)) }
     }
 
     fun skipDay() = viewModelScope.launch { repo.skipDay() }
@@ -209,6 +218,62 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
     val runData by vm.runData.collectAsStateWithLifecycle()
     var dayMenu by remember { mutableStateOf(false) }
     var peakDialog by remember { mutableStateOf(false) }
+    // Перед стартом — самочувствие; второй «плохо» подряд — предложить разгрузку на цикл
+    var askReadiness by remember { mutableStateOf(false) }
+    var offerDeload by remember { mutableStateOf(false) }
+    if (askReadiness) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { askReadiness = false },
+            title = { Text("Как самочувствие?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Сон, усталость, общее состояние.", style = MaterialTheme.typography.bodySmall)
+                    listOf(
+                        Triple(ru.streetlift.tracker.data.repo.READINESS_GOOD, "Хорошо", "план как есть"),
+                        Triple(ru.streetlift.tracker.data.repo.READINESS_MID, "Средне", "на подход меньше, запас +1"),
+                        Triple(ru.streetlift.tracker.data.repo.READINESS_BAD, "Плохо", "как разгрузка, веса не меняются"),
+                    ).forEach { (v, t, hint) ->
+                        OutlinedButton(
+                            onClick = {
+                                askReadiness = false
+                                if (v == ru.streetlift.tracker.data.repo.READINESS_BAD &&
+                                    ui.lastFinished?.readiness == ru.streetlift.tracker.data.repo.READINESS_BAD && !ui.globalDeload
+                                ) offerDeload = true
+                                else vm.start(v, onOpenWorkout)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(Modifier.fillMaxWidth()) {
+                                Text(t, style = MaterialTheme.typography.titleSmall)
+                                Text(hint, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { askReadiness = false }) { Text("Отмена") } },
+        )
+    }
+    if (offerDeload) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { offerDeload = false },
+            title = { Text("Второй раз подряд плохо") },
+            text = { Text("Похоже на накопленную усталость. Взять разгрузку на весь этот цикл?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    offerDeload = false
+                    vm.startWithDeload(onOpenWorkout)
+                }) { Text("Да, разгрузка") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    offerDeload = false
+                    vm.start(ru.streetlift.tracker.data.repo.READINESS_BAD, onOpenWorkout)
+                }) { Text("Нет, только сегодня") }
+            },
+        )
+    }
     if (peakDialog) {
         PeakDialog(
             // Новая подводка — дата не подставляется, выбирается вручную
@@ -352,7 +417,7 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
                             )
                         }
                         Button(
-                            onClick = { vm.start(onOpenWorkout) },
+                            onClick = { askReadiness = true },
                             enabled = ui.previews.any { it.plan != null } && ui.activeSession == null,
                             modifier = Modifier.fillMaxWidth(),
                         ) {

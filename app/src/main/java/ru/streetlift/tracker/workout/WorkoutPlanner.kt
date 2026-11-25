@@ -48,7 +48,12 @@ fun sideName(s: String?) = when (s) {
 sealed interface StepRow {
     data class Work(val block: ExerciseBlock, val setNumber: Int, val log: SetLogEntity?, val log2: SetLogEntity? = null) : StepRow
     data class Rest(val seconds: Int) : StepRow
+    /** Разминочный подход (не записывается). */
+    data class Warmup(val block: ExerciseBlock, val index: Int, val total: Int, val set: ru.streetlift.tracker.domain.Warmup.WSet, val done: Boolean) : StepRow
 }
+
+/** Текущий разминочный подход. */
+data class WarmupStep(val block: ExerciseBlock, val index: Int, val total: Int, val set: ru.streetlift.tracker.domain.Warmup.WSet)
 
 /** Значения для ввода подхода. */
 data class Draft(val weight: Float, val reps: Int, val rir: Int, val stage: String?, val height: Int? = null)
@@ -70,6 +75,8 @@ data class PlanResult(
     val resting: Boolean,
     /** Текущая сторона у одностороннего упражнения («L»/«R»). */
     val side: String? = null,
+    /** Сейчас разминка перед упражнением (null — рабочий подход). */
+    val warmup: WarmupStep? = null,
 ) {
     fun recommend(b: ExerciseBlock): RestRecommendation =
         RestRecommender.recommend(b.exercise.type, alternating, b.plan.isDeload)
@@ -93,6 +100,8 @@ object WorkoutPlanner {
         prefill: Map<String, Draft>,
         resting: Boolean,
         firstSides: Map<Long, String> = emptyMap(),
+        warmups: Map<Long, List<ru.streetlift.tracker.domain.Warmup.WSet>> = emptyMap(),
+        warmupDone: Map<Long, Int> = emptyMap(),
     ): PlanResult {
         val blocks = exercises.map { ex ->
             val plan = plans.getValue(ex.id)
@@ -127,6 +136,12 @@ object WorkoutPlanner {
         val setNumber = (current?.doneCount ?: 0) + 1
         val stepKey = "${current?.exercise?.id}_${current?.logs?.size}"
         val isResting = resting && current != null
+        // Разминка — перед первым подходом упражнения, пока не отмечена вся
+        val warmup = current?.takeIf { it.logs.isEmpty() }?.let { b ->
+            val list = warmups[b.exercise.id].orEmpty()
+            val done = warmupDone[b.exercise.id] ?: 0
+            list.getOrNull(done)?.let { WarmupStep(b, done, list.size, it) }
+        }
 
         val rows = mutableListOf<StepRow>()
         var currentRow = 0
@@ -136,7 +151,15 @@ object WorkoutPlanner {
                 val prev = byId.getValue(order[i - 1].first)
                 rows += StepRow.Rest(RestRecommender.recommend(prev.exercise.type, alternating, prev.plan.isDeload).seconds)
             }
-            if (current != null && id == current.exercise.id && n == setNumber) {
+            if (n == 1 && b.logs.isEmpty()) {
+                val list = warmups[id].orEmpty()
+                val done = warmupDone[id] ?: 0
+                list.forEachIndexed { k, w ->
+                    if (warmup != null && warmup.block.exercise.id == id && k == done) currentRow = rows.size
+                    rows += StepRow.Warmup(b, k, list.size, w, k < done)
+                }
+            }
+            if (warmup == null && current != null && id == current.exercise.id && n == setNumber) {
                 currentRow = if (isResting && rows.lastOrNull() is StepRow.Rest) rows.size - 1 else rows.size
             }
             val (l1, l2) = b.setLogs(n)
@@ -168,6 +191,7 @@ object WorkoutPlanner {
             canUndo = logs.isNotEmpty(),
             resting = isResting,
             side = current?.pendingSide,
+            warmup = warmup,
         )
     }
 

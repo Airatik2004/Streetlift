@@ -44,6 +44,12 @@ object ActiveWorkout {
 
     private val extra = MutableStateFlow<Map<Long, Int>>(emptyMap())
     private val prefill = MutableStateFlow<Map<String, Draft>>(emptyMap())
+    /** Сколько разминочных подходов отмечено у упражнения (в историю не пишутся). */
+    private val warmupDone = MutableStateFlow<Map<Long, Int>>(emptyMap())
+    private var warmupLists: Map<Long, List<ru.streetlift.tracker.domain.Warmup.WSet>> = emptyMap()
+
+    /** Отдых после разминочного подхода. */
+    const val WARMUP_REST_MS = 60_000L
 
     /** Что сейчас стоит в полях ввода на экране (для «Следующий» из уведомления). */
     @Volatile private var draftKey = ""
@@ -96,6 +102,8 @@ object ActiveWorkout {
                 )
                     // Подготовка к забегу: силовые в поддержке
                     ?.let { if (st.endurance && !e.isJump) ru.streetlift.tracker.domain.RunPlan.support(it) else it }
+                    // Самочувствие: средне — меньше объём (у прыжков объём не режем), плохо — как разгрузка
+                    ?.let { if (e.isJump && session.readiness == ru.streetlift.tracker.data.repo.READINESS_MID) it else ru.streetlift.tracker.data.repo.applyReadiness(it, session.readiness) }
                     // Первая тренировка подготовки после паузы — на подход меньше
                     ?.let { if (session.afterPause) it.copy(sets = (it.sets - 1).coerceAtLeast(1)) else it }
                     ?.let { if (e.isJump) ru.streetlift.tracker.domain.jumpPlan(e.jumpState, it) else it }
@@ -106,9 +114,14 @@ object ActiveWorkout {
             val firstSides = exercises.filter { it.unilateral }.associate { it.id to repo.weakSide(it.name, sessionId) }
             val own = owner(sessionId)
             TimerService.ensureRunning(app)
-            combine(repo.observeSets(sessionId), extra, prefill, RestTimer.state) { logs, ex, pf, timer ->
+            // Разминка тем же движением перед первым подходом каждого упражнения
+            val warmups = exercises.associate { e ->
+                e.id to ru.streetlift.tracker.domain.Warmup.sets(e.type, e.isSeconds, e.isJump, plans.getValue(e.id), e.loadScale)
+            }
+            warmupLists = warmups
+            combine(repo.observeSets(sessionId), extra, prefill, RestTimer.state, warmupDone) { logs, ex, pf, timer, wd ->
                 val resting = timer.owner == own && !timer.finished && !timer.idle
-                WorkoutPlanner.compute(session, exercises, plans, logs, ex, pf, resting, firstSides)
+                WorkoutPlanner.compute(session, exercises, plans, logs, ex, pf, resting, firstSides, warmups, wd)
             }.collect { _result.value = it }
         }
     }
@@ -121,7 +134,15 @@ object ActiveWorkout {
         _result.value = null
         extra.value = emptyMap()
         prefill.value = emptyMap()
+        warmupDone.value = emptyMap()
+        warmupLists = emptyMap()
         draft = null
+    }
+
+    /** Пропустить оставшуюся разминку упражнения. */
+    fun skipWarmup(exerciseId: Long) {
+        val n = warmupLists[exerciseId]?.size ?: return
+        warmupDone.update { it + (exerciseId to n) }
     }
 
     fun setDraft(key: String, d: Draft) {
@@ -140,6 +161,12 @@ object ActiveWorkout {
             return
         }
         val cur = r.current ?: return
+        // Разминка: отметить подход и короткий отдых, в историю не пишется
+        r.warmup?.let { w ->
+            warmupDone.update { it + (w.block.exercise.id to w.index + 1) }
+            TimerActions.start(ctx.applicationContext, WARMUP_REST_MS, owner = owner(r.session.id))
+            return
+        }
         val d = if (byPlan) {
             Draft(cur.plan.weightKg, cur.plan.targetReps, cur.plan.rirMax, r.defaults.stage, cur.plan.heightCm)
         } else {
@@ -181,6 +208,12 @@ object ActiveWorkout {
     fun prev(ctx: Context) {
         val r = _result.value ?: return
         if (r.resting) TimerActions.reset()
+        // Разминка текущего упражнения: шаг назад по ней
+        val cur = r.current
+        if (cur != null && cur.logs.isEmpty() && (warmupDone.value[cur.exercise.id] ?: 0) > 0) {
+            warmupDone.update { it + (cur.exercise.id to (it[cur.exercise.id] ?: 1) - 1) }
+            return
+        }
         val logs = r.blocks.flatMap { it.logs }
         val last = logs.maxByOrNull { it.loggedAt } ?: return
         val key = "${last.exerciseId}_${logs.count { it.exerciseId == last.exerciseId } - 1}"

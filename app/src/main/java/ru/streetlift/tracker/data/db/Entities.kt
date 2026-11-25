@@ -366,6 +366,8 @@ data class SessionEntity(
     val cycleInMeso: Int? = null,
     /** День 1: что выпало «через цикл» — 0 пистолетики, 1 прыжки; null — старые записи (по чётности). */
     val altSlot: Int? = null,
+    /** Самочувствие перед тренировкой (v28): 0 хорошо, 1 средне, 2 плохо. */
+    val readiness: Int = 0,
 ) {
     /** Цикл в мезоцикле для показа; у старых записей — из общего номера. */
     val shownCycle: Int get() = cycleInMeso ?: ((roundNumber - 1).mod(SettingsEntity.DELOAD_EVERY) + 1)

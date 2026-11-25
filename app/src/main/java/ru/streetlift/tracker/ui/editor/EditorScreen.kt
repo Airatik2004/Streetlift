@@ -268,7 +268,7 @@ fun EditorScreen(repo: WorkoutRepository, away: Boolean = false) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("День ${day.position + 1} из 4", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                         Text(day.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        entries.forEach { en -> PastEntryView(day, en) { live(ui, day, it)?.let { x -> editExercise = x } } }
+                        entries.forEach { en -> PastEntryView(day, en) }
                     }
                 }
             }
@@ -321,7 +321,7 @@ fun EditorScreen(repo: WorkoutRepository, away: Boolean = false) {
                         // Уже прошедший день этого цикла — как в предыдущем: дата и план, с каким выходил
                         val passed = if (block == 0) ui.currentPast[day.id] else null
                         if (passed != null) {
-                            passed.forEach { en -> PastEntryView(day, en) { live(ui, day, it)?.let { x -> editExercise = x } } }
+                            passed.forEach { en -> PastEntryView(day, en) }
                         } else {
                             HorizontalDivider()
                             ru.streetlift.tracker.domain.ProgramOrder.order(
@@ -672,17 +672,11 @@ private fun ReminderSettings(s: SettingsEntity, onChange: (SettingsEntity) -> Un
  * [ahead] — во втором цикле для упражнения, которое есть и в первом: значения текущие,
  * разгрузка показывается, только если она придётся именно на следующий цикл.
  */
-/** Упражнение из снимка → действующее (калибровка меняет план на ближайшую тренировку); null — его уже нет. */
-private fun live(ui: EditorUi, day: DayEntity, e: ExerciseEntity): ExerciseEntity? {
-    val list = ui.exercises[day.id].orEmpty()
-    return list.firstOrNull { it.id == e.id } ?: list.firstOrNull { it.name == e.name }
-}
-
 private val pastDateFmt = java.time.format.DateTimeFormatter.ofPattern("EEEE, d MMMM", java.util.Locale.forLanguageTag("ru"))
 
 /** Выход на день прошлого цикла: дата, сделан/пропущен и план упражнений, с каким выходил. */
 @Composable
-private fun PastEntryView(day: DayEntity, en: PastEntry, onEdit: (ExerciseEntity) -> Unit) {
+private fun PastEntryView(day: DayEntity, en: PastEntry) {
     HorizontalDivider()
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
@@ -704,14 +698,14 @@ private fun PastEntryView(day: DayEntity, en: PastEntry, onEdit: (ExerciseEntity
         return
     }
     ru.streetlift.tracker.domain.ProgramOrder.order(day.position, list.filter { it.activeInSlot(en.slot) }, en.priority).forEach { e ->
-        PastExerciseRow(e, en) { onEdit(e) }
+        PastExerciseRow(e, en)
     }
 }
 
-/** Упражнение по плану прошлой тренировки; нажатие — калибровка действующего упражнения. */
+/** Упражнение по плану прошлой тренировки (только просмотр). */
 @Composable
-private fun PastExerciseRow(e: ExerciseEntity, en: PastEntry, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 6.dp)) {
+private fun PastExerciseRow(e: ExerciseEntity, en: PastEntry) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(e.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
             if (e.mode == ExerciseMode.CALIBRATION) Tag("Калибровка", MaterialTheme.colorScheme.secondary)

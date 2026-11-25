@@ -82,9 +82,10 @@ class PowerTest {
     fun warmupBelowWork() {
         val plan = Power.plan(Kind.BENCH, Lift.BENCH, 2, 100f, null, PeakPhase.TAPER1)!!
         val w = Power.warmup(Lift.BENCH, plan)
-        assertEquals(20f, w.first().weightKg, 0.001f)
+        assertEquals(3, w.size)
         assertTrue(w.all { it.weightKg < plan.weightKg })
-        assertEquals(w.size, w.map { it.weightKg }.distinct().size)
+        assertEquals(listOf(5, 3, 1), w.map { it.reps })
+        assertEquals(2, Power.warmup(Lift.BENCH, plan.copy(isDeload = true)).size)
     }
 
     @Test

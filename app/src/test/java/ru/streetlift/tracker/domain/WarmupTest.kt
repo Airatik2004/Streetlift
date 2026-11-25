@@ -24,19 +24,32 @@ class WarmupTest {
 
     @Test
     fun bodyweight_andBands() {
-        // Без резин: половина цели без веса
-        assertEquals(listOf(Warmup.WSet(0f, 3)), Warmup.sets(ExerciseType.HEAVY_LEVER, false, false, plan(0f), scale))
-        // С резинами: помощь сильнее
+        // Без резин: три подхода без веса, меньше цели
+        val bw = Warmup.sets(ExerciseType.HEAVY_LEVER, false, false, plan(0f, reps = 10), scale)
+        assertEquals(listOf(3, 5, 3), bw.map { it.reps })
+        assertTrue(bw.all { it.weightKg == 0f })
+        // С резинами: помощь сильнее, три подхода
         val bands = LoadScale(1.25f, listOf(-75f, -45f, -30f, -20f))
         val s = Warmup.sets(ExerciseType.HEAVY_LEVER, false, false, plan(-20f), bands)
-        assertTrue(s.single().weightKg < -20f)
+        assertEquals(listOf(-45f, -30f, -30f), s.map { it.weightKg })
+    }
+
+    @Test
+    fun alwaysThree_noDedup_deloadTwo() {
+        // Малый вес: веса совпадают после округления, но подходов всё равно 3
+        val s = Warmup.sets(ExerciseType.EXPLOSIVE, false, false, plan(1.25f), scale)
+        assertEquals(3, s.size)
+        assertTrue(s.all { it.weightKg < 1.25f })
+        assertEquals(2, Warmup.sets(ExerciseType.EXPLOSIVE, false, false, plan(20f).copy(isDeload = true), scale).size)
     }
 
     @Test
     fun skipped_forStaticIsolation_andJumpsLower() {
         assertTrue(Warmup.sets(ExerciseType.STATIC_HOLD, true, false, plan(0f), scale).isEmpty())
         assertTrue(Warmup.sets(ExerciseType.ISOLATION, false, false, plan(0f), scale).isEmpty())
-        assertEquals(45, Warmup.sets(ExerciseType.EXPLOSIVE, false, true, plan(0f, height = 60), scale).single().heightCm)
+        val j = Warmup.sets(ExerciseType.EXPLOSIVE, false, true, plan(0f, height = 60), scale)
+        assertEquals(listOf(45, 45, 45), j.map { it.heightCm })
+        assertEquals(listOf(0f, 5f, 10f), j.map { it.weightKg })
     }
 
     @Test

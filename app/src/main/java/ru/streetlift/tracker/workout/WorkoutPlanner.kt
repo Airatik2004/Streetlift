@@ -188,7 +188,9 @@ object WorkoutPlanner {
             rows = rows,
             currentRow = currentRow,
             defaults = defaults,
-            canUndo = logs.isNotEmpty(),
+            // ⏮ работает и по разминке текущего упражнения — до состояния без разминки
+            canUndo = logs.isNotEmpty() ||
+                (current != null && current.logs.isEmpty() && (warmupDone[current.exercise.id] ?: 0) > 0),
             resting = isResting,
             side = current?.pendingSide,
             warmup = warmup,

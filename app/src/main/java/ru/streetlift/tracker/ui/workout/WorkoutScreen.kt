@@ -548,7 +548,7 @@ private fun WorkPanel(
     Stepper(
         label = when {
             cur.exercise.isJump -> "Прыжков (удачных)"
-            cur.exercise.isSeconds -> "Секунды (±1)"
+            cur.exercise.isSeconds -> "Секунды (шаг 1 с)"
             else -> "Повторы"
         },
         value = reps.toString(),

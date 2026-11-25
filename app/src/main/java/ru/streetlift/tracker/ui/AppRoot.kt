@@ -1,6 +1,9 @@
 package ru.streetlift.tracker.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
@@ -15,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -103,7 +107,14 @@ fun AppRoot(repo: WorkoutRepository) {
     ) { padding ->
         NavHost(nav, startDestination = "main", modifier = Modifier.padding(padding)) {
             composable("main") {
-                androidx.compose.foundation.pager.HorizontalPager(state = pager, beyondViewportPageCount = 1) { page ->
+              val active by repo.activeSession.collectAsStateWithLifecycle(initialValue = null)
+              androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
+                // Незавершённая тренировка — закреплена сверху на «Главной» и в «Цикле», не уезжает при прокрутке
+                val a = active
+                if (a != null && pager.currentPage <= 1) ActiveWorkoutBar(a.dayName) { nav.navigate("workout/${a.id}") { launchSingleTop = true } }
+                androidx.compose.foundation.pager.HorizontalPager(
+                    state = pager, beyondViewportPageCount = 1, modifier = Modifier.weight(1f),
+                ) { page ->
                     when (page) {
                         0 -> HomeScreen(repo, onOpenWorkout = { id -> nav.navigate("workout/$id") })
                         1 -> EditorScreen(repo)
@@ -111,6 +122,7 @@ fun AppRoot(repo: WorkoutRepository) {
                         else -> ru.streetlift.tracker.ui.stats.StatsScreen(repo)
                     }
                 }
+              }
             }
             composable(
                 "workout/{sessionId}",
@@ -119,6 +131,26 @@ fun AppRoot(repo: WorkoutRepository) {
                 val id = entry.arguments?.getLong("sessionId") ?: 0L
                 WorkoutScreen(repo, id, onExit = { nav.popBackStack("main", inclusive = false) })
             }
+        }
+    }
+}
+
+/** Плашка незавершённой тренировки: нажатие — открыть тренировку. */
+@Composable
+private fun ActiveWorkoutBar(dayName: String, onOpen: () -> Unit) {
+    androidx.compose.material3.Surface(
+        color = androidx.compose.material3.MaterialTheme.colorScheme.primaryContainer,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
+    ) {
+        androidx.compose.foundation.layout.Row(
+            Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        ) {
+            androidx.compose.foundation.layout.Column(Modifier.weight(1f)) {
+                Text("Незавершённая тренировка", style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
+                Text(dayName, style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
+            }
+            androidx.compose.material3.Button(onClick = onOpen) { Text("Продолжить") }
         }
     }
 }

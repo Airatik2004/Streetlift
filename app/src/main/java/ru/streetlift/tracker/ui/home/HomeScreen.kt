@@ -378,23 +378,6 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
             }
         }
 
-        ui.activeSession?.let { active ->
-            item {
-                Card(
-                    Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                ) {
-                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Незавершённая тренировка", style = MaterialTheme.typography.titleMedium)
-                            Text(active.dayName, style = MaterialTheme.typography.bodyMedium)
-                        }
-                        Button(onClick = { onOpenWorkout(active.id) }) { Text("Продолжить") }
-                    }
-                }
-            }
-        }
-
         // --- Прогноз следующей тренировки ---
         ui.nextDay?.let { day ->
             item {
@@ -403,13 +386,14 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(
-                                    "Следующая: ${formatNextDate(s.nextWorkoutEpochDay)}",
+                                    if (ui.activeSession != null) "Текущая" else "Следующая: ${formatNextDate(s.nextWorkoutEpochDay)}",
                                     style = MaterialTheme.typography.labelLarge,
                                     color = MaterialTheme.colorScheme.primary,
                                 )
                                 Text(day.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                             }
-                            Box {
+                            // Во время тренировки день не меняем
+                            if (ui.activeSession == null) Box {
                                 TextButton(onClick = { dayMenu = true }) {
                                     Icon(Icons.Filled.SwapHoriz, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(4.dp))
@@ -446,18 +430,19 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        val active = ui.activeSession
                         Button(
-                            onClick = { askReadiness = true },
-                            enabled = ui.previews.any { it.plan != null } && ui.activeSession == null,
+                            onClick = { if (active != null) onOpenWorkout(active.id) else askReadiness = true },
+                            enabled = active != null || ui.previews.any { it.plan != null },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Icon(Icons.Filled.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
-                            Text("Начать тренировку")
+                            Text(if (active != null) "Продолжить" else "Начать тренировку")
                         }
                         val today = LocalDate.now().toEpochDay()
                         val postponed = (s.nextWorkoutEpochDay ?: today) > today
-                        if (postponed || s.canUndoSkip) {
+                        if (active == null && (postponed || s.canUndoSkip)) {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 if (postponed) {
                                     TextButton(onClick = { vm.prepone() }, modifier = Modifier.weight(1f)) { Text("−1 день") }
@@ -469,7 +454,7 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
                                 }
                             }
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (active == null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = { vm.postpone() }, modifier = Modifier.weight(1f)) {
                                 Icon(Icons.Filled.Schedule, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(4.dp))
@@ -590,7 +575,7 @@ private fun PreviewRow(p: ExercisePreview, globalDeload: Boolean, deloadEvery: I
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(
-                "Подберите вес/стадию под коридор с запасом 2 повторения",
+                if (e.isSeconds) "Подберите вес/стадию под коридор с запасом 2 с" else "Подберите вес/стадию под коридор с запасом 2 повторения",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -89,7 +89,7 @@ fun WeightStepper(
     onValueClick: (() -> Unit)? = null,
 ) {
     Stepper(
-        label = "Вес (шаг ${ru.streetlift.tracker.domain.Fmt.step(scale.step)})",
+        label = "Вес (шаг ${ru.streetlift.tracker.domain.Fmt.step(scale.step).replace('.', ',')} кг)",
         value = ru.streetlift.tracker.domain.Fmt.weightValue(weight),
         onMinus = { onChange(scale.down(weight)) },
         onPlus = { onChange(scale.up(weight)) },

@@ -107,4 +107,12 @@ class CompetitionTest {
         assertEquals(12, m[8]!!.reps)
         assertTrue(Competition.decode("").isEmpty())
     }
+
+    @Test
+    fun age_onStartDay() {
+        val birth = java.time.LocalDate.of(2004, 6, 2).toEpochDay()
+        // За день до дня рождения — ещё 22, в день рождения — 23
+        assertEquals(22, ru.streetlift.tracker.data.db.SettingsEntity.ageOn(birth, java.time.LocalDate.of(2027, 6, 1).toEpochDay()))
+        assertEquals(23, ru.streetlift.tracker.data.db.SettingsEntity.ageOn(birth, java.time.LocalDate.of(2027, 6, 2).toEpochDay()))
+    }
 }

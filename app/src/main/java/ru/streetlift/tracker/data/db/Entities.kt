@@ -75,8 +75,13 @@ data class SettingsEntity(
     val runStart: Long? = null,
     val runRace: Long? = null,
     val runBaseKm: Float? = null,
+    /** Дата рождения (epochDay, v26) — возраст для дивизионов считается на день старта. Старое поле birthYear не используется. */
+    val birthDate: Long? = null,
 ) {
     companion object {
+        fun ageOn(birth: Long, day: Long): Int =
+            java.time.Period.between(java.time.LocalDate.ofEpochDay(birth), java.time.LocalDate.ofEpochDay(day)).years
+
         /** Плановая разгрузка всегда на 5-м цикле (у задней дельты — 9-я и 10-я тренировки). */
         const val DELOAD_EVERY = 5
         const val PEAK_RECORDS = "RECORDS"
@@ -97,8 +102,8 @@ data class SettingsEntity(
         return ru.streetlift.tracker.domain.RunPlan.build(runStart ?: race, race, d, runPerWeek ?: ru.streetlift.tracker.domain.RunPlan.DEFAULT_RUNS, (runBaseKm ?: 0f).toDouble())
     }
 
-    /** Возраст в этом году (по году рождения). */
-    fun age(year: Int): Int? = birthYear?.let { year - it }
+    /** Полных лет на день [day] (по дате рождения). */
+    fun ageOn(day: Long): Int? = birthDate?.let { ageOn(it, day) }
 
     val discipline: ru.streetlift.tracker.domain.Discipline?
         get() = if (peakMode == PEAK_COMPETITION) ru.streetlift.tracker.domain.Discipline.byId(compDiscipline) else null

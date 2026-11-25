@@ -168,8 +168,8 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
     fun setDeload(want: Boolean) = viewModelScope.launch { repo.setDeload(want) }
     fun setPeak(epochDay: Long, ids: Set<Long>, bw: Float?) = viewModelScope.launch { repo.setPeak(epochDay, ids, bw) }
     fun clearPeak() = viewModelScope.launch { repo.clearPeak() }
-    fun setCompetitionPeak(epochDay: Long, disc: String, bw: Float?, year: Int?) =
-        viewModelScope.launch { repo.setCompetitionPeak(epochDay, disc, bw, year) }
+    fun setCompetitionPeak(epochDay: Long, disc: String, bw: Float?, birth: Long?) =
+        viewModelScope.launch { repo.setCompetitionPeak(epochDay, disc, bw, birth) }
     suspend fun estimate(d: Discipline, bw: Float?): Competition.Estimate? = repo.competitionEstimate(d, bw)
     suspend fun compForecast(d: Discipline, bw: Float, target: Long) = repo.competitionForecast(d, bw, target)
 
@@ -226,9 +226,9 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
                 peakDialog = false
                 vm.setPeak(d, ids, bw)
             },
-            onSaveCompetition = { d, disc, bw, year ->
+            onSaveCompetition = { d, disc, bw, birth ->
                 peakDialog = false
-                vm.setCompetitionPeak(d, disc, bw, year)
+                vm.setCompetitionPeak(d, disc, bw, birth)
             },
         )
     }
@@ -590,7 +590,7 @@ private fun PeakDialog(
     onSaveRun: (RunPlan.Dist, Long, Int?, Int) -> Unit,
     onDismiss: () -> Unit,
     onSaveRecords: (Long, Set<Long>, Float?) -> Unit,
-    onSaveCompetition: (Long, String, Float?, Int?) -> Unit,
+    onSaveCompetition: (Long, String, Float?, Long?) -> Unit,
 ) {
     val initialDay = settings.peakEpochDay
     val initialIds = settings.peakIds
@@ -601,19 +601,41 @@ private fun PeakDialog(
     var perWeek by remember { mutableStateOf(settings.runPerWeek ?: RunPlan.DEFAULT_RUNS) }
     var day by remember { mutableStateOf<Long?>(if (settings.endurance) settings.runRace else initialDay) }
     var bw by remember { mutableStateOf(settings.bodyWeightKg?.let { Fmt.step(it) } ?: "") }
-    var year by remember { mutableStateOf(settings.birthYear?.toString() ?: "") }
+    var birth by remember { mutableStateOf(settings.birthDate) }
     var ids by remember { mutableStateOf(if (wasComp) emptySet() else initialIds) }
     var discId by remember { mutableStateOf(if (wasComp) settings.compDiscipline else null) }
     var kind by remember { mutableStateOf(Discipline.byId(settings.compDiscipline)?.kind ?: CompKind.MAX) }
     var picking by remember { mutableStateOf(false) }
+    var pickingBirth by remember { mutableStateOf(false) }
     val today = LocalDate.now().toEpochDay()
     val minDay = today + Peaking.MIN_SPAN
     // Уже выставленную дату можно оставить, новую — не ближе 7 дней
     val d = day
     val dayOk = d != null && (d >= minDay || d == initialDay && initialDay != null || settings.endurance && d == settings.runRace)
     val bwValue = bw.replace(',', '.').toFloatOrNull()?.takeIf { it > 0f }
-    val yearValue = year.toIntOrNull()?.takeIf { it in 1920..LocalDate.now().year }
-    val age = yearValue?.let { LocalDate.now().year - it }
+    // Возраст — на день старта (пока дата не выбрана — на сегодня)
+    val age = birth?.let { SettingsEntity.ageOn(it, d ?: today) }
+
+    if (pickingBirth) {
+        val state = androidx.compose.material3.rememberDatePickerState(
+            initialSelectedDateMillis = birth?.let { it * 86_400_000L },
+            initialDisplayMode = androidx.compose.material3.DisplayMode.Input,
+            selectableDates = object : androidx.compose.material3.SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean = utcTimeMillis / 86_400_000L <= today
+            },
+        )
+        androidx.compose.material3.DatePickerDialog(
+            onDismissRequest = { pickingBirth = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    state.selectedDateMillis?.let { birth = it / 86_400_000L }
+                    pickingBirth = false
+                }) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { pickingBirth = false }) { Text("Отмена") } },
+        ) { androidx.compose.material3.DatePicker(state = state, title = { Text("Дата рождения", Modifier.padding(start = 24.dp, top = 16.dp)) }) }
+        return
+    }
 
     if (picking) {
         val state = androidx.compose.material3.rememberDatePickerState(
@@ -716,17 +738,14 @@ private fun PeakDialog(
                     return@Column
                 }
                 // ----- Соревнования -----
-                androidx.compose.material3.OutlinedTextField(
-                    value = year,
-                    onValueChange = { year = it.filter(Char::isDigit).take(4) },
-                    label = { Text("Год рождения") },
-                    singleLine = true,
-                    isError = year.isNotBlank() && yearValue == null,
-                    supportingText = { Text(if (age == null) "Без года показаны все дивизионы" else "Возраст в этом году: $age") },
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
+                OutlinedButton(onClick = { pickingBirth = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (birth == null) "Дата рождения" else "Дата рождения: " + LocalDate.ofEpochDay(birth!!).format(peakDateFmt))
+                }
+                Text(
+                    if (age == null) "Без даты рождения показаны все дивизионы"
+                    else "Возраст ${if (d != null) "на день старта" else "сегодня"}: $age",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Row(
                     Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()),
@@ -768,7 +787,7 @@ private fun PeakDialog(
                 onClick = {
                     if (d == null) return@TextButton
                     when (tab) {
-                        0 -> discId?.let { onSaveCompetition(d, it, bwValue, yearValue) }
+                        0 -> discId?.let { onSaveCompetition(d, it, bwValue, birth) }
                         1 -> onSaveRecords(d, ids, bwValue)
                         else -> runDist?.let { dist ->
                             // Цель не задана — середина реалистичного коридора

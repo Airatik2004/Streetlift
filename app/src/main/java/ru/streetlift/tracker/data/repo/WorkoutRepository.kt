@@ -226,8 +226,8 @@ class WorkoutRepository(private val db: AppDatabase) {
         )
     }
 
-    suspend fun setBirthYear(year: Int?) {
-        settingsDao.upsert(getSettings().copy(birthYear = year))
+    suspend fun setBirthDate(day: Long?) {
+        settingsDao.upsert(getSettings().copy(birthDate = day))
     }
 
     // ---------------- Соревнования ----------------
@@ -260,8 +260,8 @@ class WorkoutRepository(private val db: AppDatabase) {
         )
     }
 
-    /** Выход на пик к соревнованиям: дата, дисциплина, свой вес и год рождения. */
-    suspend fun setCompetitionPeak(epochDay: Long, disciplineId: String, bodyWeightKg: Float?, birthYear: Int?) {
+    /** Выход на пик к соревнованиям: дата, дисциплина, свой вес и дата рождения. */
+    suspend fun setCompetitionPeak(epochDay: Long, disciplineId: String, bodyWeightKg: Float?, birthDate: Long?) {
         val d = ru.streetlift.tracker.domain.Discipline.byId(disciplineId) ?: return
         val cur = getSettings()
         val bw = bodyWeightKg ?: cur.bodyWeightKg
@@ -274,7 +274,7 @@ class WorkoutRepository(private val db: AppDatabase) {
                 else (epochDay - today()).toInt().coerceIn(Peaking.MIN_SPAN, Peaking.FULL_SPAN),
                 peakExerciseIds = ids.joinToString(","),
                 bodyWeightKg = bw,
-                birthYear = birthYear ?: cur.birthYear,
+                birthDate = birthDate ?: cur.birthDate,
                 peakMode = SettingsEntity.PEAK_COMPETITION,
                 compDiscipline = d.id,
                 compPlan = competitionSnapshot(d, bw),

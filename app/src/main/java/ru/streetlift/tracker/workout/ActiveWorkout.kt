@@ -94,6 +94,8 @@ object ActiveWorkout {
                     e.toConfig(), e.toState(), e.type, phase == PeakPhase.NONE && e.plannedDeload(st.deloadEvery, session.isDeload), phase, e.id in peakIds, bodyWeight,
                     comp = st.compTarget(e.id, e.name),
                 )
+                    // Подготовка к забегу: силовые в поддержке
+                    ?.let { if (st.endurance && !e.isJump) ru.streetlift.tracker.domain.RunPlan.support(it) else it }
                     // Первая тренировка подготовки после паузы — на подход меньше
                     ?.let { if (session.afterPause) it.copy(sets = (it.sets - 1).coerceAtLeast(1)) else it }
                     ?.let { if (e.isJump) ru.streetlift.tracker.domain.jumpPlan(e.jumpState, it) else it }

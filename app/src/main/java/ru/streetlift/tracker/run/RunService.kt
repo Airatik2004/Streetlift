@@ -45,7 +45,11 @@ class RunService : Service() {
         // Высота — по барометру, если он есть, иначе по GPS.
         val alt = baroAlt ?: if (loc.hasAltitude()) loc.altitude else null
         RunTracker.onLocation(loc.latitude, loc.longitude, if (loc.hasAccuracy()) loc.accuracy else null, alt)
-            ?.let { announceKm(it) }
+            ?.let { if (RunWorkout.state.value.active == null) announceKm(it) }
+        // Пробежка по плану: смена отрезка — объявление
+        if (RunTracker.state.value.running) {
+            RunWorkout.onDistance(RunTracker.state.value.distanceM)?.let { announce(it) }
+        }
     }
 
     // ---- Барометр: высота точнее GPS ----
@@ -101,8 +105,12 @@ class RunService : Service() {
     }
 
     /** Отсечка километра: голосом (музыка приглушается) или сигналом. */
-    private fun announceKm(cue: RunTracker.KmCue) {
-        val mode = ru.streetlift.tracker.timer.TimerPrefs.load(this).runKmCue
+    private fun announceKm(cue: RunTracker.KmCue) = say(kmPhrase(cue), "km${cue.km}", ru.streetlift.tracker.timer.TimerPrefs.load(this).runKmCue)
+
+    /** Смена отрезка пробежки по плану: голосом, если доступен, иначе двойной сигнал с вибрацией. */
+    private fun announce(text: String) = say(text, "seg${System.currentTimeMillis()}", if (ttsReady) 2 else 1)
+
+    private fun say(text: String, id: String, mode: Int) {
         if (mode == 0) return
         val t = tts
         if (mode == 2 && t != null && ttsReady) {
@@ -116,7 +124,7 @@ class RunService : Service() {
                 ).build()
             am.requestAudioFocus(req)
             focus = req
-            t.speak(kmPhrase(cue), android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "km${cue.km}")
+            t.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, id)
         } else {
             ru.streetlift.tracker.timer.Beeper.pip()
             scope.launch {
@@ -311,12 +319,14 @@ class RunService : Service() {
         /** Отменить во время обратного отсчёта. */
         fun cancel(context: Context) {
             RunTracker.cancel()
+            RunWorkout.clear()
             context.stopService(Intent(context, RunService::class.java))
         }
 
         /** Завершить и сохранить пробежку (если было хоть сколько-то времени). */
         fun stopRun(context: Context) {
             val done = RunTracker.finish()
+            RunWorkout.clear()
             val app = context.applicationContext as StreetLiftApp
             if (done.accumulatedMs >= 5_000) {
                 CoroutineScope(Dispatchers.IO).launch {

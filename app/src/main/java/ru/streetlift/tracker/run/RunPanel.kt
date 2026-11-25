@@ -43,6 +43,14 @@ import kotlinx.coroutines.delay
 fun RunPanel(prefs: ru.streetlift.tracker.timer.TimerPrefs.Prefs, update: (ru.streetlift.tracker.timer.TimerPrefs.Prefs) -> Unit) {
     val ctx = LocalContext.current
     val st by RunTracker.state.collectAsStateWithLifecycle()
+    // Пробежка по плану подготовки к забегу
+    val repo = (ctx.applicationContext as ru.streetlift.tracker.StreetLiftApp).repository
+    val settings by repo.settings.collectAsStateWithLifecycle(initialValue = null)
+    val runData by repo.runData.collectAsStateWithLifecycle(initialValue = emptyList())
+    val wk by RunWorkout.state.collectAsStateWithLifecycle()
+    val today = java.time.LocalDate.now().toEpochDay()
+    val planSettings = settings?.takeIf { it.endurance }
+    val todayItem = planSettings?.runItems()?.firstOrNull { it.epochDay == today && !ru.streetlift.tracker.domain.RunPlan.isDone(it, runData) }
     var now by remember { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
     LaunchedEffect(st.phase) {
         while (st.running || st.autoPaused) {
@@ -133,10 +141,64 @@ fun RunPanel(prefs: ru.streetlift.tracker.timer.TimerPrefs.Prefs, update: (ru.st
                 )
             }
         }
+        // Сегодня по плану — запуск с отрезками и целевыми темпами
+        if (st.phase == RunTracker.Phase.IDLE && todayItem != null && planSettings != null) {
+            val dist = planSettings.runDist
+            val v = ru.streetlift.tracker.domain.RunPlan.fitness(runData, today)
+            val paces = if (dist != null && v != null) todayItem.segs.map {
+                ru.streetlift.tracker.domain.RunPlan.zonePace(it.zone, v, dist, planSettings.runGoalSec?.toDouble())
+            } else emptyList()
+            androidx.compose.material3.Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Сегодня по плану: ${todayItem.title()}", style = MaterialTheme.typography.titleSmall)
+                    todayItem.segs.forEachIndexed { i, seg ->
+                        Text(
+                            "${seg.kind.title} ${ru.streetlift.tracker.domain.RunStats.distance(seg.m.toDouble())}" +
+                                (paces.getOrNull(i)?.let { " · ${ru.streetlift.tracker.domain.RunStats.pace(it)}/км" } ?: ""),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    Button(
+                        onClick = {
+                            refresh()
+                            RunWorkout.load(todayItem, paces)
+                            if (fine) {
+                                saved = false
+                                RunService.start(ctx)
+                            } else {
+                                launcher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Старт по плану") }
+                }
+            }
+        }
+        // Идёт пробежка по плану: текущий отрезок
+        val seg = wk.seg
+        if (st.active && wk.active != null) {
+            androidx.compose.material3.Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    if (seg == null) {
+                        Text("План выполнен — можно заканчивать", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                    } else {
+                        val num = wk.workNumber()?.takeIf { seg.kind == ru.streetlift.tracker.domain.RunPlan.SegKind.WORK }
+                        Text(seg.kind.title + (num?.let { " ${it.first} из ${it.second}" } ?: ""), style = MaterialTheme.typography.titleSmall)
+                        val leftM = (seg.m - (st.distanceM - wk.segStartM)).coerceAtLeast(0.0)
+                        Text(
+                            "Осталось ${ru.streetlift.tracker.domain.RunStats.distance(leftM)}" +
+                                (wk.pace?.let { " · цель ${ru.streetlift.tracker.domain.RunStats.pace(it)}/км" } ?: ""),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
+        }
         when (st.phase) {
             RunTracker.Phase.IDLE -> Button(
                 onClick = {
                     refresh()
+                    RunWorkout.clear()
                     if (fine) {
                         saved = false
                         RunService.start(ctx)

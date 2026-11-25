@@ -2,6 +2,7 @@ package ru.streetlift.tracker.data.repo
 
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import ru.streetlift.tracker.data.backup.BackupData
 import ru.streetlift.tracker.data.backup.BackupJson
@@ -210,6 +211,7 @@ class WorkoutRepository(private val db: AppDatabase) {
                 peakExerciseIds = exerciseIds.joinToString(","),
                 bodyWeightKg = bodyWeightKg ?: getSettings().bodyWeightKg,
                 peakMode = SettingsEntity.PEAK_RECORDS, compDiscipline = null, compPlan = "",
+                runDistM = null, runGoalSec = null, runPerWeek = null, runStart = null, runRace = null, runBaseKm = null,
             ),
         )
     }
@@ -219,6 +221,7 @@ class WorkoutRepository(private val db: AppDatabase) {
             getSettings().copy(
                 peakEpochDay = null, peakExerciseIds = "", peakSpanDays = null,
                 peakMode = SettingsEntity.PEAK_RECORDS, compDiscipline = null, compPlan = "",
+                runDistM = null, runGoalSec = null, runPerWeek = null, runStart = null, runRace = null, runBaseKm = null,
             ),
         )
     }
@@ -275,8 +278,63 @@ class WorkoutRepository(private val db: AppDatabase) {
                 peakMode = SettingsEntity.PEAK_COMPETITION,
                 compDiscipline = d.id,
                 compPlan = competitionSnapshot(d, bw),
+                runDistM = null, runGoalSec = null, runPerWeek = null, runStart = null, runRace = null, runBaseKm = null,
             ),
         )
+    }
+
+    // ---------------- Бег: подготовка к забегу ----------------
+
+    /** Пробежки для плана: день, дистанция, лучшие отрезки. */
+    val runData: Flow<List<ru.streetlift.tracker.domain.RunPlan.RunData>> =
+        statsDao.observeRuns().map { list -> list.mapNotNull(::toRunData) }.flowOn(kotlinx.coroutines.Dispatchers.Default)
+
+    private fun toRunData(r: ru.streetlift.tracker.data.db.RunEntity): ru.streetlift.tracker.domain.RunPlan.RunData? {
+        val tr = runCatching {
+            ru.streetlift.tracker.domain.RunStats.track(ru.streetlift.tracker.run.RunTracker.toStats(ru.streetlift.tracker.run.RunTracker.decode(r.route)))
+        }.getOrNull() ?: return null
+        if (tr.size < 2) return null
+        val day = java.time.Instant.ofEpochMilli(r.startedAt).atZone(java.time.ZoneId.systemDefault()).toLocalDate().toEpochDay()
+        val efforts = ru.streetlift.tracker.domain.RunPlan.EFFORT_WINDOWS.mapNotNull { w ->
+            ru.streetlift.tracker.domain.RunStats.best(tr, w.toDouble())?.let { w to it.first }
+        }.toMap()
+        return ru.streetlift.tracker.domain.RunPlan.RunData(day, tr.last().d, efforts)
+    }
+
+    suspend fun runDataNow(): List<ru.streetlift.tracker.domain.RunPlan.RunData> = statsDao.getRuns().mapNotNull(::toRunData)
+
+    /** Начать подготовку к забегу: силовые уходят в поддержку, другие виды пика сбрасываются. */
+    suspend fun setRunPlan(dist: ru.streetlift.tracker.domain.RunPlan.Dist, race: Long, goalSec: Int?, perWeek: Int) {
+        val runs = runDataNow()
+        settingsDao.upsert(
+            getSettings().copy(
+                peakEpochDay = null, peakExerciseIds = "", peakSpanDays = null,
+                peakMode = SettingsEntity.PEAK_ENDURANCE, compDiscipline = null, compPlan = "",
+                runDistM = dist.m, runGoalSec = goalSec, runPerWeek = perWeek, runStart = today(), runRace = race,
+                runBaseKm = ru.streetlift.tracker.domain.RunPlan.recentWeeklyKm(runs, today()).toFloat(),
+            ),
+        )
+    }
+
+    /**
+     * Проверка плана бега (при открытии приложения): после старта — подготовка окончена;
+     * пропущенная пробежка — план перестраивается с сегодняшнего дня по текущему объёму.
+     */
+    suspend fun checkRunPlan() {
+        val s = getSettings()
+        if (!s.endurance) return
+        val race = s.runRace ?: return
+        if (today() > race) {
+            clearPeak()
+            return
+        }
+        val runs = runDataNow()
+        val missed = s.runItems().any { it.epochDay < today() && !ru.streetlift.tracker.domain.RunPlan.isDone(it, runs) }
+        if (missed) {
+            settingsDao.upsert(
+                s.copy(runStart = today(), runBaseKm = ru.streetlift.tracker.domain.RunPlan.recentWeeklyKm(runs, today()).toFloat()),
+            )
+        }
     }
 
     /** Обновить снимок оценок соревновательного пика (после тренировки). */
@@ -378,7 +436,8 @@ class WorkoutRepository(private val db: AppDatabase) {
         val peak = session.peakPhase?.let { runCatching { PeakPhase.valueOf(it) }.getOrNull() }
         if (peak != null) lines += "Выход на пик (${peak.title}) — рабочий план не меняется, результаты в истории."
         // Через цикл (пистолетики / прыжки): не участвовавшее в этой тренировке упражнение не трогаем
-        val updated = if (peak != null) emptyList() else exercises.filter { it.activeInSlot(session.effectiveAltSlot) }.map { ex ->
+        if (s.endurance) lines += "Подготовка к забегу — силовые в поддержке, рабочий план не меняется."
+        val updated = if (peak != null || s.endurance) emptyList() else exercises.filter { it.activeInSlot(session.effectiveAltSlot) }.map { ex ->
             val exLogs = logs.filter { it.exerciseId == ex.id }
             // Своя плановая разгрузка упражнения (или общая принудительная) либо аварийная
             val planned = ex.plannedDeload(s.deloadEvery, session.isDeload)

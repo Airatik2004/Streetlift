@@ -68,12 +68,33 @@ data class SettingsEntity(
     /** Соревнования: id дисциплины и снимок оценок для плана (Competition.encode). */
     val compDiscipline: String? = null,
     val compPlan: String = "",
+    /** Подготовка к забегу (v25): дистанция, цель (с), пробежек в неделю, начало плана, день старта, база км/нед. */
+    val runDistM: Int? = null,
+    val runGoalSec: Int? = null,
+    val runPerWeek: Int? = null,
+    val runStart: Long? = null,
+    val runRace: Long? = null,
+    val runBaseKm: Float? = null,
 ) {
     companion object {
         /** Плановая разгрузка всегда на 5-м цикле (у задней дельты — 9-я и 10-я тренировки). */
         const val DELOAD_EVERY = 5
         const val PEAK_RECORDS = "RECORDS"
         const val PEAK_COMPETITION = "COMPETITION"
+        const val PEAK_ENDURANCE = "ENDURANCE"
+    }
+
+    /** Идёт подготовка к забегу: силовые в поддержке. */
+    val endurance: Boolean get() = peakMode == PEAK_ENDURANCE && runRace != null
+
+    val runDist: ru.streetlift.tracker.domain.RunPlan.Dist? get() = ru.streetlift.tracker.domain.RunPlan.Dist.byM(runDistM)
+
+    /** План пробежек (пусто — подготовки нет). */
+    fun runItems(): List<ru.streetlift.tracker.domain.RunPlan.Item> {
+        val d = runDist ?: return emptyList()
+        val race = runRace ?: return emptyList()
+        if (!endurance) return emptyList()
+        return ru.streetlift.tracker.domain.RunPlan.build(runStart ?: race, race, d, runPerWeek ?: ru.streetlift.tracker.domain.RunPlan.DEFAULT_RUNS, (runBaseKm ?: 0f).toDouble())
     }
 
     /** Возраст в этом году (по году рождения). */

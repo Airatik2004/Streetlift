@@ -62,6 +62,8 @@ import ru.streetlift.tracker.domain.Fmt
 import ru.streetlift.tracker.domain.PeakPhase
 import ru.streetlift.tracker.domain.Peaking
 import ru.streetlift.tracker.domain.ProgressionEngine
+import ru.streetlift.tracker.domain.RunPlan
+import ru.streetlift.tracker.domain.RunStats
 import ru.streetlift.tracker.domain.SessionPlan
 import ru.streetlift.tracker.ui.common.Tag
 import ru.streetlift.tracker.ui.theme.DeloadGreen
@@ -129,6 +131,7 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
             day.position, exs.filter { it.dayId == day.id && it.activeInSlot(ru.streetlift.tracker.data.db.nextAltSlot(lastAlt)) }.sortedBy { it.position }, s.priority,
         ) { phase != PeakPhase.NONE && it.id in peakIds }
             .map { ExercisePreview(it, Peaking.resolve(it.toConfig(), it.toState(), it.type, phase == PeakPhase.NONE && it.plannedDeload(s.deloadEvery, global), phase, it.id in peakIds, s.bodyWeightKg, s.compTarget(it.id, it.name))
+                ?.let { p -> if (s.endurance && !it.isJump) ru.streetlift.tracker.domain.RunPlan.support(p) else p }
                 ?.let { p -> if (afterPause) p.copy(sets = (p.sets - 1).coerceAtLeast(1)) else p }
                 ?.let { p -> if (it.isJump) ru.streetlift.tracker.domain.jumpPlan(it.jumpState, p) else p }) }
         val dayOrder = days.associate { it.id to it.position }
@@ -169,8 +172,15 @@ class HomeViewModel(private val repo: WorkoutRepository) : ViewModel() {
         viewModelScope.launch { repo.setCompetitionPeak(epochDay, disc, bw, year) }
     suspend fun estimate(d: Discipline, bw: Float?): Competition.Estimate? = repo.competitionEstimate(d, bw)
 
+    val runData: StateFlow<List<RunPlan.RunData>> = repo.runData.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    fun setRunPlan(dist: RunPlan.Dist, race: Long, goalSec: Int?, perWeek: Int) =
+        viewModelScope.launch { repo.setRunPlan(dist, race, goalSec, perWeek) }
+
     init {
-        viewModelScope.launch { repo.checkPeakExpired() }
+        viewModelScope.launch {
+            repo.checkPeakExpired()
+            repo.checkRunPlan()
+        }
     }
 }
 
@@ -195,6 +205,7 @@ fun formatDateTime(millis: Long): String =
 fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
     val vm: HomeViewModel = viewModel(factory = viewModelFactory { initializer { HomeViewModel(repo) } })
     val ui by vm.state.collectAsStateWithLifecycle()
+    val runData by vm.runData.collectAsStateWithLifecycle()
     var dayMenu by remember { mutableStateOf(false) }
     var peakDialog by remember { mutableStateOf(false) }
     if (peakDialog) {
@@ -204,6 +215,11 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
             exercises = ui.allExercises,
             dayNames = ui.days.associate { it.id to it.name },
             estimate = vm::estimate,
+            runData = runData,
+            onSaveRun = { dist, d, goal, per ->
+                peakDialog = false
+                vm.setRunPlan(dist, d, goal, per)
+            },
             onDismiss = { peakDialog = false },
             onSaveRecords = { d, ids, bw ->
                 peakDialog = false
@@ -376,11 +392,15 @@ fun HomeScreen(repo: WorkoutRepository, onOpenWorkout: (Long) -> Unit) {
 
         // --- Подводка к старту (под карточкой тренировки) ---
         item {
-            PeakCard(
-                ui = ui,
-                onEdit = { peakDialog = true },
-                onClear = { vm.clearPeak() },
-            )
+            if (ui.settings.endurance) {
+                RunPlanCard(ui.settings, runData, onEdit = { peakDialog = true }, onClear = { vm.clearPeak() })
+            } else {
+                PeakCard(
+                    ui = ui,
+                    onEdit = { peakDialog = true },
+                    onClear = { vm.clearPeak() },
+                )
+            }
         }
 
         if (ui.showWeightsHint) {
@@ -543,6 +563,8 @@ private fun PeakDialog(
     exercises: List<ExerciseEntity>,
     dayNames: Map<Long, String>,
     estimate: suspend (Discipline, Float?) -> Competition.Estimate?,
+    runData: List<RunPlan.RunData>,
+    onSaveRun: (RunPlan.Dist, Long, Int?, Int) -> Unit,
     onDismiss: () -> Unit,
     onSaveRecords: (Long, Set<Long>, Float?) -> Unit,
     onSaveCompetition: (Long, String, Float?, Int?) -> Unit,
@@ -550,8 +572,11 @@ private fun PeakDialog(
     val initialDay = settings.peakEpochDay
     val initialIds = settings.peakIds
     val wasComp = settings.peakMode == SettingsEntity.PEAK_COMPETITION
-    var tab by remember { mutableStateOf(if (wasComp || initialDay == null) 0 else 1) }
-    var day by remember { mutableStateOf<Long?>(initialDay) }
+    var tab by remember { mutableStateOf(if (settings.endurance) 2 else if (wasComp || initialDay == null) 0 else 1) }
+    var runDist by remember { mutableStateOf(settings.runDist) }
+    var goal by remember { mutableStateOf(settings.runGoalSec?.let { RunPlan.time(it.toDouble()) } ?: "") }
+    var perWeek by remember { mutableStateOf(settings.runPerWeek ?: RunPlan.DEFAULT_RUNS) }
+    var day by remember { mutableStateOf<Long?>(if (settings.endurance) settings.runRace else initialDay) }
     var bw by remember { mutableStateOf(settings.bodyWeightKg?.let { Fmt.step(it) } ?: "") }
     var year by remember { mutableStateOf(settings.birthYear?.toString() ?: "") }
     var ids by remember { mutableStateOf(if (wasComp) emptySet() else initialIds) }
@@ -562,7 +587,7 @@ private fun PeakDialog(
     val minDay = today + Peaking.MIN_SPAN
     // Уже выставленную дату можно оставить, новую — не ближе 7 дней
     val d = day
-    val dayOk = d != null && (d >= minDay || d == initialDay && initialDay != null)
+    val dayOk = d != null && (d >= minDay || d == initialDay && initialDay != null || settings.endurance && d == settings.runRace)
     val bwValue = bw.replace(',', '.').toFloatOrNull()?.takeIf { it > 0f }
     val yearValue = year.toIntOrNull()?.takeIf { it in 1920..LocalDate.now().year }
     val age = yearValue?.let { LocalDate.now().year - it }
@@ -604,14 +629,6 @@ private fun PeakDialog(
                         androidx.compose.material3.FilterChip(selected = tab == i, onClick = { tab = i }, label = { Text(t) })
                     }
                 }
-                if (tab == 2) {
-                    Text(
-                        "Бег: подготовка к дистанции и целевому времени — следующий этап. Пока выбрать нельзя.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    return@Column
-                }
                 OutlinedButton(onClick = { picking = true }, modifier = Modifier.fillMaxWidth()) {
                     Text(if (d == null) "Выбрать дату" else "Дата: " + LocalDate.ofEpochDay(d).format(peakDateFmt))
                 }
@@ -620,12 +637,23 @@ private fun PeakDialog(
                     when {
                         d == null -> "Выберите дату пика. Ближе 7 дней выбрать нельзя."
                         !dayOk -> "Ближе 7 дней выбрать нельзя — выберите другую дату."
+                        tab == 2 && left > RunPlan.MAX_WEEKS * 7L -> "Больше года — прогноз на такой срок не даём, выберите дату ближе."
+                        tab == 2 -> "Дата забега. План — с сегодняшнего дня до неё."
                         left < Peaking.FULL_SPAN -> "До пика $left ${plural(left.toInt(), "день", "дня", "дней")} — меньше 22, подготовка будет ускоренной: отдых и тонус полностью, остальное сокращается. Ближе 7 дней выбрать нельзя."
                         else -> "Полная подготовка начнётся за 22 дня до даты. Ближе 7 дней выбрать нельзя."
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (d != null && (!dayOk || left < Peaking.FULL_SPAN)) WarnOrange else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (d != null && (!dayOk || (tab != 2 && left < Peaking.FULL_SPAN) || (tab == 2 && left > RunPlan.MAX_WEEKS * 7L))) WarnOrange
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (tab == 2) {
+                    EnduranceTab(
+                        runData = runData, day = d, dist = runDist, onDist = { runDist = it },
+                        goal = goal, onGoal = { goal = it }, perWeek = perWeek, onPerWeek = { perWeek = it },
+                        onDay = { day = it },
+                    )
+                    return@Column
+                }
                 androidx.compose.material3.OutlinedTextField(
                     value = bw,
                     onValueChange = { bw = it },
@@ -707,15 +735,24 @@ private fun PeakDialog(
             }
         },
         confirmButton = {
+            val fitness = RunPlan.fitness(runData, today)
             val ok = dayOk && when (tab) {
                 0 -> Discipline.byId(discId)?.kind == kind
                 1 -> true
-                else -> false
+                else -> runDist != null && fitness != null && d != null && d - today <= RunPlan.MAX_WEEKS * 7L
             }
             TextButton(
                 onClick = {
                     if (d == null) return@TextButton
-                    if (tab == 0) discId?.let { onSaveCompetition(d, it, bwValue, yearValue) } else onSaveRecords(d, ids, bwValue)
+                    when (tab) {
+                        0 -> discId?.let { onSaveCompetition(d, it, bwValue, yearValue) }
+                        1 -> onSaveRecords(d, ids, bwValue)
+                        else -> runDist?.let { dist ->
+                            // Цель не задана — середина реалистичного коридора
+                            val g = RunPlan.parseTime(goal) ?: fitness?.let { RunPlan.corridor(dist, it, perWeek, d - today).midSec.toInt() }
+                            onSaveRun(dist, d, g, perWeek)
+                        }
+                    }
                 },
                 enabled = ok,
             ) { Text("Сохранить") }
@@ -775,5 +812,154 @@ private fun CompInfo(disc: Discipline, bodyWeight: Float?, estimate: suspend (Di
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+private val runDateFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE, d MMM", Locale.forLanguageTag("ru"))
+
+/** Вкладка «Выносливость»: дистанция, цель, пробежек в неделю — программа считает реалистичность и план. */
+@Composable
+private fun EnduranceTab(
+    runData: List<RunPlan.RunData>,
+    day: Long?,
+    dist: RunPlan.Dist?,
+    onDist: (RunPlan.Dist) -> Unit,
+    goal: String,
+    onGoal: (String) -> Unit,
+    perWeek: Int,
+    onPerWeek: (Int) -> Unit,
+    onDay: (Long) -> Unit,
+) {
+    val today = LocalDate.now().toEpochDay()
+    Text("Дистанция:", style = MaterialTheme.typography.labelMedium)
+    Row(
+        Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        RunPlan.Dist.entries.forEach { dd ->
+            androidx.compose.material3.FilterChip(selected = dist == dd, onClick = { onDist(dd) }, label = { Text(dd.title) })
+        }
+    }
+    val v = RunPlan.fitness(runData, today)
+    if (v == null) {
+        Text(
+            "Нет пробежек за 8 недель хотя бы на 1 км — оценить форму не по чему. Пробегите 3–5 км в полную силу, и программа построит план.",
+            style = MaterialTheme.typography.bodySmall,
+            color = WarnOrange,
+        )
+        return
+    }
+    if (dist == null) return
+    Text("Сейчас примерно: ${RunPlan.time(RunPlan.predictSec(dist, v))} на ${dist.title}", style = MaterialTheme.typography.bodyMedium)
+    // Пробежек в неделю: сначала предлагается максимум, меньше — план и цель пересчитываются
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Пробежек в неделю", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        TextButton(onClick = { onPerWeek((perWeek - 1).coerceAtLeast(1)) }) { Text("−") }
+        Text("$perWeek", style = MaterialTheme.typography.titleMedium)
+        TextButton(onClick = { onPerWeek((perWeek + 1).coerceAtMost(7)) }) { Text("+") }
+    }
+    androidx.compose.material3.OutlinedTextField(
+        value = goal,
+        onValueChange = { onGoal(it.filter { c -> c.isDigit() || c == ':' }.take(8)) },
+        label = { Text("Желаемое время (мм:сс или ч:мм:сс)") },
+        singleLine = true,
+        isError = goal.isNotBlank() && RunPlan.parseTime(goal) == null,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    val goalSec = RunPlan.parseTime(goal)?.toDouble()
+    if (day != null && day > today && day - today <= RunPlan.MAX_WEEKS * 7L) {
+        val c = RunPlan.corridor(dist, v, perWeek, day - today)
+        Text(
+            "Реалистично к дате при $perWeek пробежках в неделю: ${RunPlan.time(c.fastSec)} – ${RunPlan.time(c.slowSec)} (в среднем ${RunPlan.time(c.midSec)})",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        when {
+            goalSec == null -> Text("Цель не задана — возьмём середину коридора.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            goalSec < c.fastSec -> {
+                Text("Цель быстрее реалистичного к этой дате — скорее всего, не получится.", style = MaterialTheme.typography.bodySmall, color = WarnOrange)
+                TextButton(onClick = { onGoal(RunPlan.time(c.midSec)) }) { Text("Взять реалистичную: ${RunPlan.time(c.midSec)}") }
+            }
+            else -> Text("Цель реалистична.", style = MaterialTheme.typography.bodySmall, color = DeloadGreen)
+        }
+    }
+    if (goalSec != null) {
+        val w = RunPlan.weeksNeeded(dist, v, goalSec, perWeek)
+        when {
+            w == null -> Text("На эту цель при $perWeek пробежках в неделю нужно больше года — прогноз не даём.", style = MaterialTheme.typography.bodySmall, color = WarnOrange)
+            w == 0 -> Text("Уже по силам — можно ставить старт хоть через неделю.", style = MaterialTheme.typography.bodySmall)
+            else -> {
+                val target = today + maxOf(w * 7L, Peaking.MIN_SPAN.toLong())
+                Text("На эту цель нужно примерно $w ${plural(w, "неделю", "недели", "недель")}.", style = MaterialTheme.typography.bodySmall)
+                if (day != target) TextButton(onClick = { onDay(target) }) { Text("Поставить дату: ${LocalDate.ofEpochDay(target).format(peakDateFmt)}") }
+            }
+        }
+    }
+    if (day != null && day > today && day - today <= RunPlan.MAX_WEEKS * 7L) {
+        val items = RunPlan.build(today, day, dist, perWeek, RunPlan.recentWeeklyKm(runData, today))
+        val firstWeek = items.filter { it.epochDay < today + 7 }
+        Text(
+            "План: ${items.size} ${plural(items.size, "пробежка", "пробежки", "пробежек")} до старта, силовые на это время — в поддержке (меньше подходов, без прогрессии).",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        firstWeek.forEach {
+            Text("· ${LocalDate.ofEpochDay(it.epochDay).format(runDateFmt)} — ${it.title()}", style = MaterialTheme.typography.bodySmall)
+        }
+        Text(
+            "Рост формы — модель с допущениями, поэтому цель — коридор. Он сужается по мере тренировок; пропуск — план перестраивается.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Карточка подготовки к забегу: цель, коридор, ближайшие пробежки с темпами. */
+@Composable
+private fun RunPlanCard(s: SettingsEntity, runData: List<RunPlan.RunData>, onEdit: () -> Unit, onClear: () -> Unit) {
+    val today = LocalDate.now().toEpochDay()
+    val dist = s.runDist ?: return
+    val race = s.runRace ?: return
+    val v = RunPlan.fitness(runData, today)
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Подготовка к забегу", style = MaterialTheme.typography.titleMedium)
+            val left = race - today
+            Text(
+                "${dist.title} · ${LocalDate.ofEpochDay(race).format(peakDateFmt)} · " +
+                    if (left == 0L) "сегодня" else "через $left ${plural(left.toInt(), "день", "дня", "дней")}",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            s.runGoalSec?.let { Text("Цель: ${RunPlan.time(it.toDouble())}", style = MaterialTheme.typography.bodyMedium) }
+            if (v != null) {
+                val c = RunPlan.corridor(dist, v, s.runPerWeek ?: RunPlan.DEFAULT_RUNS, left)
+                Text(
+                    "Сейчас ~${RunPlan.time(RunPlan.predictSec(dist, v))} · к старту реально ${RunPlan.time(c.fastSec)} – ${RunPlan.time(c.slowSec)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            val items = s.runItems()
+            val next = items.filter { it.epochDay >= today && !RunPlan.isDone(it, runData) }.take(3)
+            next.forEach { item ->
+                val paces = item.segs.filter { it.kind == RunPlan.SegKind.WORK || it.kind == RunPlan.SegKind.STEADY }
+                    .map { it.zone }.distinct()
+                    .joinToString(", ") { z -> v?.let { "${z.title} ${RunStats.pace(RunPlan.zonePace(z, it, dist, s.runGoalSec?.toDouble()))}/км" } ?: z.title }
+                Text(
+                    (if (item.epochDay == today) "Сегодня" else LocalDate.ofEpochDay(item.epochDay).format(runDateFmt)) +
+                        " — ${item.title()}" + if (paces.isNotEmpty()) " · $paces" else "",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Text(
+                "Силовые — в поддержке. Пробежку по плану можно запустить во вкладке «Таймер» → «Бег».",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onEdit) { Text("Изменить") }
+                TextButton(onClick = onClear) { Text("Сбросить") }
+            }
+        }
     }
 }

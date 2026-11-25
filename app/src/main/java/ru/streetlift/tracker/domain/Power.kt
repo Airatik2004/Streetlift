@@ -138,18 +138,6 @@ object Power {
         else -> "лёгкая"
     }
 
-    /** Разминка со штангой: ~50% × 5, ~70% × 3, ~85% × 1 (в разгрузке — первые 2). Строго легче рабочего. */
-    fun warmup(lift: Lift, plan: SessionPlan): List<Warmup.WSet> {
-        val w = plan.weightKg
-        // Строго легче рабочего (если некуда — не меньше грифа); одинаковые веса не убираем
-        fun under(f: Float): Float {
-            val v = round(lift, w * f)
-            return if (v >= w - 0.001f) max(lift.bar, ProgressionEngine.roundWeight(w - lift.step)) else v
-        }
-        val list = listOf(Warmup.WSet(under(0.5f), 5), Warmup.WSet(under(0.7f), 3), Warmup.WSet(under(0.85f), 1))
-        return Warmup.limit(list, plan.isDeload)
-    }
-
     /** Максимум на 1 раз по оценке (кратно шагу вниз). */
     fun oneRm(lift: Lift, e1rm: Float): Float = ProgressionEngine.roundWeight(floor(e1rm / lift.step) * lift.step)
 }

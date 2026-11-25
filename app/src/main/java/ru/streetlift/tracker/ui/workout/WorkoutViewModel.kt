@@ -41,8 +41,6 @@ data class WorkoutUi(
     val canUndo: Boolean = false,
     /** Фаза подводки («Предпик», «Тейпер 1»…) или null. */
     val peakTitle: String? = null,
-    /** Разминка перед упражнением (не записывается). */
-    val warmup: ru.streetlift.tracker.workout.WarmupStep? = null,
 )
 
 /** Экран — лишь вид на [ActiveWorkout]: та же логика работает из уведомления. */
@@ -86,7 +84,6 @@ class WorkoutViewModel(
                 peakTitle = r.session.peakPhase?.let {
                     runCatching { ru.streetlift.tracker.domain.PeakPhase.valueOf(it).title }.getOrNull()
                 },
-                warmup = r.warmup,
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WorkoutUi())

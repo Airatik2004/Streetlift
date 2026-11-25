@@ -3,7 +3,7 @@ package ru.streetlift.tracker.domain
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/** Резина: название и помощь в кг; [hidden] — скрыта из программ (лестница, план, разминка), но не удалена. */
+/** Резина: название и помощь в кг; [hidden] — скрыта из программ (лестница, план), но не удалена. */
 data class Band(val name: String, val kg: Float, val hidden: Boolean = false)
 
 /** Сочетание резин: помощь (отрицательный вес) и что взять. */

@@ -206,7 +206,6 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                         }
                     }
                     ui.resting -> RestPanel(timer, ui)
-                    ui.warmup != null -> WarmupPanel(ui.warmup!!)
                     else -> WorkPanel(
                         ui = ui,
                         weight = weight, reps = reps, rir = rir, height = height,
@@ -231,28 +230,6 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth().background(bg).padding(vertical = 4.dp),
                     )
-                    is StepRow.Warmup -> Row(
-                        Modifier.fillMaxWidth().background(bg).padding(horizontal = 16.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            "Разминка · ${row.block.exercise.name} " +
-                                (if (row.sides.isNotEmpty()) "${row.index / 2 + 1}/${row.total / 2}" else "${row.index + 1}/${row.total}"),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            warmupText(row.set) + when {
-                                // Односторонние: «Л ✓», затем «Л ✓ П ✓»
-                                row.sides.isNotEmpty() -> row.sidesDone.joinToString("") { " ${sideLetter(it)} ✓" }
-                                row.done -> " ✓"
-                                else -> ""
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
                     is StepRow.Work -> {
                         val log = row.log
                         Row(
@@ -622,25 +599,4 @@ private fun sideLetter(s: String?) = when (s) {
     "L" -> "Л"
     "R" -> "П"
     else -> ""
-}
-
-/** «+10 × 3» / «45 см · 0 × 3» / «−30 · Чёрная × 5». */
-private fun warmupText(w: ru.streetlift.tracker.domain.Warmup.WSet): String = ru.streetlift.tracker.workout.warmupSetText(w)
-
-/** Текущий разминочный подход: тем же движением, в историю не пишется. */
-@Composable
-private fun WarmupPanel(w: ru.streetlift.tracker.workout.WarmupStep) {
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    Text(w.label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-    Text(w.block.exercise.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-    Spacer(Modifier.height(6.dp))
-    Text(warmupText(w.set), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-    Text(
-        "Легко, с большим запасом. В историю не записывается.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Spacer(Modifier.height(10.dp))
-    Button(onClick = { ActiveWorkout.next(ctx) }, modifier = Modifier.fillMaxWidth()) { Text("Готово") }
-    TextButton(onClick = { ActiveWorkout.skipWarmup(w.block.exercise.id) }) { Text("Пропустить разминку") }
 }

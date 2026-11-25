@@ -79,16 +79,6 @@ class PowerTest {
     }
 
     @Test
-    fun warmupBelowWork() {
-        val plan = Power.plan(Kind.BENCH, Lift.BENCH, 2, 100f, null, PeakPhase.TAPER1)!!
-        val w = Power.warmup(Lift.BENCH, plan)
-        assertEquals(3, w.size)
-        assertTrue(w.all { it.weightKg < plan.weightKg })
-        assertEquals(listOf(5, 3, 1), w.map { it.reps })
-        assertEquals(2, Power.warmup(Lift.BENCH, plan.copy(isDeload = true)).size)
-    }
-
-    @Test
     fun wrpfRanks() {
         // 75 кг, жим 120 — КМС (117,5), до МС 135
         val (done, next) = Kind.BENCH.table!!.evaluate(75f, 120f)

@@ -48,32 +48,7 @@ fun sideName(s: String?) = when (s) {
 sealed interface StepRow {
     data class Work(val block: ExerciseBlock, val setNumber: Int, val log: SetLogEntity?, val log2: SetLogEntity? = null) : StepRow
     data class Rest(val seconds: Int) : StepRow
-    /** Разминочный подход (не записывается). */
-    /**
-     * Подход разминки. У односторонних — одна строка на обе стороны (как у рабочих подходов):
-     * [index]/[total] — шаги по сторонам, [sides] — порядок сторон, [sidesDone] — уже сделанные.
-     */
-    data class Warmup(
-        val block: ExerciseBlock, val index: Int, val total: Int, val set: ru.streetlift.tracker.domain.Warmup.WSet, val done: Boolean,
-        val sides: List<String> = emptyList(), val sidesDone: List<String> = emptyList(),
-    ) : StepRow
 }
-
-/** Текущий разминочный подход. */
-data class WarmupStep(val block: ExerciseBlock, val index: Int, val total: Int, val set: ru.streetlift.tracker.domain.Warmup.WSet) {
-    /** «Разминка 1 из 3 · левая» (у односторонних — номер подхода, а не стороны). */
-    val label: String get() = warmupLabel(index, total, set.side)
-}
-
-/** «Разминка 1 из 3» / «Разминка 1 из 3 · левая». */
-fun warmupLabel(index: Int, total: Int, side: String?): String =
-    if (side != null) "Разминка ${index / 2 + 1} из ${total / 2} · ${sideName(side)}"
-    else "Разминка ${index + 1} из $total"
-
-/** «45 см · +5 × 3» / «−30 · Чёрная × 5». */
-fun warmupSetText(w: ru.streetlift.tracker.domain.Warmup.WSet): String =
-    (w.heightCm?.let { "$it см · " } ?: "") + ru.streetlift.tracker.domain.Fmt.weightValue(w.weightKg) +
-        (ru.streetlift.tracker.domain.Bands.describe(w.weightKg)?.let { " · $it" } ?: "") + " × ${w.reps}"
 
 /** Значения для ввода подхода. */
 data class Draft(val weight: Float, val reps: Int, val rir: Int, val stage: String?, val height: Int? = null)
@@ -95,16 +70,13 @@ data class PlanResult(
     val resting: Boolean,
     /** Текущая сторона у одностороннего упражнения («L»/«R»). */
     val side: String? = null,
-    /** Сейчас разминка перед упражнением (null — рабочий подход). */
-    val warmup: WarmupStep? = null,
 ) {
     fun recommend(b: ExerciseBlock): RestRecommendation =
         RestRecommender.recommend(b.exercise.type, alternating, b.plan.isDeload)
 
     /** «Отжимания в горизонте · подход 3 из 4». */
     val exerciseLine: String
-        get() = warmup?.let { "${it.block.exercise.name} · ${it.label.replaceFirstChar { c -> c.lowercase() }}" }
-            ?: current?.let {
+        get() = current?.let {
                 "${it.exercise.name} · подход $setNumber из ${it.plannedCount}" + (side?.let { s -> " · ${sideName(s)}" } ?: "")
             } ?: "Все подходы сделаны"
 }
@@ -121,8 +93,6 @@ object WorkoutPlanner {
         prefill: Map<String, Draft>,
         resting: Boolean,
         firstSides: Map<Long, String> = emptyMap(),
-        warmups: Map<Long, List<ru.streetlift.tracker.domain.Warmup.WSet>> = emptyMap(),
-        warmupDone: Map<Long, Int> = emptyMap(),
     ): PlanResult {
         val blocks = exercises.map { ex ->
             val plan = plans.getValue(ex.id)
@@ -157,13 +127,6 @@ object WorkoutPlanner {
         val setNumber = (current?.doneCount ?: 0) + 1
         val stepKey = "${current?.exercise?.id}_${current?.logs?.size}"
         val isResting = resting && current != null
-        // Разминка — перед первым подходом упражнения, пока не отмечена вся
-        val warmup = current?.takeIf { it.logs.isEmpty() }?.let { b ->
-            val list = warmups[b.exercise.id].orEmpty()
-            val done = warmupDone[b.exercise.id] ?: 0
-            list.getOrNull(done)?.let { WarmupStep(b, done, list.size, it) }
-        }
-
         val rows = mutableListOf<StepRow>()
         var currentRow = 0
         order.forEachIndexed { i, (id, n) ->
@@ -172,27 +135,7 @@ object WorkoutPlanner {
                 val prev = byId.getValue(order[i - 1].first)
                 rows += StepRow.Rest(RestRecommender.recommend(prev.exercise.type, alternating, prev.plan.isDeload).seconds)
             }
-            if (n == 1 && b.logs.isEmpty()) {
-                val list = warmups[id].orEmpty()
-                val done = warmupDone[id] ?: 0
-                val paired = list.isNotEmpty() && list.all { it.side != null } && list.size % 2 == 0
-                if (paired) {
-                    // Односторонние: обе стороны подхода разминки — одной строкой
-                    for (k0 in list.indices step 2) {
-                        val pair = list.subList(k0, k0 + 2)
-                        if (warmup != null && warmup.block.exercise.id == id && (done == k0 || done == k0 + 1)) currentRow = rows.size
-                        rows += StepRow.Warmup(
-                            b, k0, list.size, pair[0], k0 + 1 < done,
-                            sides = pair.mapNotNull { it.side },
-                            sidesDone = pair.filterIndexed { i, _ -> k0 + i < done }.mapNotNull { it.side },
-                        )
-                    }
-                } else list.forEachIndexed { k, w ->
-                    if (warmup != null && warmup.block.exercise.id == id && k == done) currentRow = rows.size
-                    rows += StepRow.Warmup(b, k, list.size, w, k < done)
-                }
-            }
-            if (warmup == null && current != null && id == current.exercise.id && n == setNumber) {
+            if (current != null && id == current.exercise.id && n == setNumber) {
                 currentRow = if (isResting && rows.lastOrNull() is StepRow.Rest) rows.size - 1 else rows.size
             }
             val (l1, l2) = b.setLogs(n)
@@ -221,12 +164,9 @@ object WorkoutPlanner {
             rows = rows,
             currentRow = currentRow,
             defaults = defaults,
-            // ⏮ работает и по разминке текущего упражнения — до состояния без разминки
-            canUndo = logs.isNotEmpty() ||
-                (current != null && current.logs.isEmpty() && (warmupDone[current.exercise.id] ?: 0) > 0),
+            canUndo = logs.isNotEmpty(),
             resting = isResting,
             side = current?.pendingSide,
-            warmup = warmup,
         )
     }
 

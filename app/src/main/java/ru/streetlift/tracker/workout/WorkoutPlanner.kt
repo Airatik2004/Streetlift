@@ -49,7 +49,14 @@ sealed interface StepRow {
     data class Work(val block: ExerciseBlock, val setNumber: Int, val log: SetLogEntity?, val log2: SetLogEntity? = null) : StepRow
     data class Rest(val seconds: Int) : StepRow
     /** Разминочный подход (не записывается). */
-    data class Warmup(val block: ExerciseBlock, val index: Int, val total: Int, val set: ru.streetlift.tracker.domain.Warmup.WSet, val done: Boolean) : StepRow
+    /**
+     * Подход разминки. У односторонних — одна строка на обе стороны (как у рабочих подходов):
+     * [index]/[total] — шаги по сторонам, [sides] — порядок сторон, [sidesDone] — уже сделанные.
+     */
+    data class Warmup(
+        val block: ExerciseBlock, val index: Int, val total: Int, val set: ru.streetlift.tracker.domain.Warmup.WSet, val done: Boolean,
+        val sides: List<String> = emptyList(), val sidesDone: List<String> = emptyList(),
+    ) : StepRow
 }
 
 /** Текущий разминочный подход. */
@@ -168,7 +175,19 @@ object WorkoutPlanner {
             if (n == 1 && b.logs.isEmpty()) {
                 val list = warmups[id].orEmpty()
                 val done = warmupDone[id] ?: 0
-                list.forEachIndexed { k, w ->
+                val paired = list.isNotEmpty() && list.all { it.side != null } && list.size % 2 == 0
+                if (paired) {
+                    // Односторонние: обе стороны подхода разминки — одной строкой
+                    for (k0 in list.indices step 2) {
+                        val pair = list.subList(k0, k0 + 2)
+                        if (warmup != null && warmup.block.exercise.id == id && (done == k0 || done == k0 + 1)) currentRow = rows.size
+                        rows += StepRow.Warmup(
+                            b, k0, list.size, pair[0], k0 + 1 < done,
+                            sides = pair.mapNotNull { it.side },
+                            sidesDone = pair.filterIndexed { i, _ -> k0 + i < done }.mapNotNull { it.side },
+                        )
+                    }
+                } else list.forEachIndexed { k, w ->
                     if (warmup != null && warmup.block.exercise.id == id && k == done) currentRow = rows.size
                     rows += StepRow.Warmup(b, k, list.size, w, k < done)
                 }

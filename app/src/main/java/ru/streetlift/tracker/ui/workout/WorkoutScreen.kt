@@ -237,13 +237,18 @@ fun WorkoutScreen(repo: WorkoutRepository, sessionId: Long, onExit: () -> Unit) 
                     ) {
                         Text(
                             "Разминка · ${row.block.exercise.name} " +
-                                (if (row.set.side != null) "${row.index / 2 + 1}/${row.total / 2} ${sideLetter(row.set.side)}" else "${row.index + 1}/${row.total}"),
+                                (if (row.sides.isNotEmpty()) "${row.index / 2 + 1}/${row.total / 2}" else "${row.index + 1}/${row.total}"),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f),
                         )
                         Text(
-                            warmupText(row.set) + if (row.done) " ✓" else "",
+                            warmupText(row.set) + when {
+                                // Односторонние: «Л ✓», затем «Л ✓ П ✓»
+                                row.sides.isNotEmpty() -> row.sidesDone.joinToString("") { " ${sideLetter(it)} ✓" }
+                                row.done -> " ✓"
+                                else -> ""
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

@@ -690,7 +690,12 @@ class WorkoutRepository(private val db: AppDatabase) {
             // Ссылки истории на упражнения — по названию в новой программе
             val newIdByName = restored.associate { it.name to it.id }
             val dayIdByName = programDao.getDays().associate { it.name to it.id }
-            sessionDao.insertSessions(data.sessions.map { it.copy(dayId = dayIdByName[it.dayName]) })
+            sessionDao.insertSessions(
+                data.sessions.map { ses ->
+                    val dn = DefaultTemplate.renamedDays[ses.dayName] ?: ses.dayName
+                    ses.copy(dayName = dn, dayId = dayIdByName[dn])
+                },
+            )
             sessionDao.insertSets(
                 data.sets.map { st ->
                     val name = DefaultTemplate.renamed[st.exerciseName] ?: st.exerciseName

@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ManualRecordEntity::class,
         RunEntity::class,
     ],
-    version = 21,
+    version = 22,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -29,6 +29,16 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun statsDao(): StatsDao
 
     companion object {
+        /** v22: «День 2 · Горизонт + 1 рука» → «День 2 · Горизонт + П1Р» (программа и история). */
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                val old = "День 2 · Горизонт + 1 рука"
+                val new = "День 2 · Горизонт + П1Р"
+                db.execSQL("UPDATE days SET name = ? WHERE name = ?", arrayOf(new, old))
+                db.execSQL("UPDATE sessions SET dayName = ? WHERE dayName = ?", arrayOf(new, old))
+            }
+        }
+
         /** v21: плато — сброс и разгон, сдвиг коридора повторов. */
         val MIGRATION_20_21 = object : Migration(20, 21) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -200,7 +210,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "streetlift.db")
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22)
                 // Самая первая сборка (v1) не сохраняется — пересоздаётся
                 .fallbackToDestructiveMigration()
                 .build()

@@ -48,7 +48,7 @@ object DefaultTemplate {
             ),
         ),
         Day(
-            "День 2 · Горизонт + 1 рука", false,
+            "День 2 · Горизонт + П1Р", false,
             listOf(
                 Ex("Отжимания в горизонте", HEAVY_LEVER, 3..3, 5..8, 1..2, 1.25f, StageGroups.LEVER),
                 Ex("Подтягивания на 1 руке", HEAVY_LEVER, 3..4, 3..6, 1..2, 1.25f),
@@ -78,6 +78,9 @@ object DefaultTemplate {
         "Подтягивания глубоким хватом" to "Подтягивания",
         "Обратные разведения на заднюю дельту" to "Разведения на дельту",
     )
+
+    /** Старые названия дней → новые (для импорта старых бэкапов). */
+    val renamedDays = mapOf("День 2 · Горизонт + 1 рука" to "День 2 · Горизонт + П1Р")
 
     fun builtInStages(): List<StageEntity> = StageGroups.lists.flatMap { (group, list) ->
         list.mapIndexed { i, st ->

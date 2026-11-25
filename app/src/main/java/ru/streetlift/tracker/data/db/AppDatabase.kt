@@ -55,11 +55,11 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_22_23 = object : Migration(22, 23) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
-                    "UPDATE stages SET description = ? WHERE builtIn = 1 AND name = ?",
+                    "UPDATE leverage_stages SET description = ? WHERE builtIn = 1 AND name = ?",
                     arrayOf("Прямые ноги разведены широко, больше 60°", "Ноги врозь (широкие, >60°)"),
                 )
                 db.execSQL(
-                    "UPDATE stages SET description = ? WHERE builtIn = 1 AND name = ?",
+                    "UPDATE leverage_stages SET description = ? WHERE builtIn = 1 AND name = ?",
                     arrayOf("Прямые ноги разведены немного, около 30°", "Ноги врозь (узкие, ~30°)"),
                 )
             }
